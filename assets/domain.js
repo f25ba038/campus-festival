@@ -19,7 +19,10 @@
     },
     expenses(s, groupId) {
       return s.expenses
-        .filter((x) => !groupId || x.groupId === groupId)
+        .filter(
+          (x) =>
+            x.status === "approved" && (!groupId || x.groupId === groupId),
+        )
         .reduce((n, x) => n + Number(x.amount), 0);
     },
     remaining(s, groupId) {
@@ -83,7 +86,7 @@
       return s.notices;
     },
     canApprove(role) {
-      return role !== "leader";
+      return role === "admin";
     },
     cancelApplication(s, id) {
       const a = s.applications.find((a) => a.id === id);
@@ -119,8 +122,8 @@
     editCopy(row) {
       return row;
     },
-    roundedAmount(value) {
-      return Math.trunc(Number(value));
+    amountValue(value) {
+      return Number(value);
     },
     overdueTasks(s, today) {
       return s.tasks.filter((t) => D.overdue(t, today));
@@ -157,8 +160,10 @@
       return [...rows].sort((a, b) => a.due.localeCompare(b.due));
     },
     approve(s, id) {
+      if (!D.canApprove(s.role)) return false;
       const a = s.applications.find((a) => a.id === id);
-      if (!a || a.status === "approved" || a.status === "cancelled") return;
+      if (!a || a.status === "approved" || a.status === "cancelled")
+        return false;
       a.status = "approved";
       s.reservations.push({
         id: D.nextId(s.reservations, "R"),
@@ -171,6 +176,7 @@
         attendees: a.attendees,
         status: "approved",
       });
+      return true;
     },
     validateRequired(r, fields) {
       return fields.every((k) => String(r[k] ?? "").trim().length > 0);

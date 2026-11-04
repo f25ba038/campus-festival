@@ -19,8 +19,11 @@
     storageWarning = "",
     filterText = "",
     filterStatus = "",
+    groupFilter = "active",
     sortKey = "id",
     editing = null,
+    saveError = "",
+    hasUnsavedChanges = false,
     toastTimer;
   try {
     const saved = localStorage.getItem(KEY);
@@ -32,6 +35,7 @@
     storageWarning =
       "保存済みデータを読み込めなかったため、初期データを表示しています。必要ならバックアップから復元してください。";
   }
+  let lastSavedState = JSON.stringify(state);
   const labels = {
     draft: "下書き",
     submitted: "承認待ち",
@@ -145,6 +149,11 @@
   function name(collection, id) {
     return state[collection].find((r) => r.id === id)?.name || "未設定";
   }
+  function groupLabel(id) {
+    const group = state.groups.find((g) => g.id === id);
+    if (!group) return "未設定";
+    return `${esc(group.name)}${group.archivedAt ? ' <small class="subtitle">（削除済み）</small>' : ""}`;
+  }
   function badge(v) {
     return `<span class="badge ${esc(v)}">${esc(labels[v] || v)}</span>`;
   }
@@ -158,12 +167,26 @@
     state.activity.unshift({ at: new Date().toISOString(), message });
     state.activity = state.activity.slice(0, 100);
     try {
-      localStorage.setItem(KEY, JSON.stringify(state));
+      const serialized = JSON.stringify(state);
+      localStorage.setItem(KEY, serialized);
+      lastSavedState = serialized;
     } catch (e) {
-      toast("保存できませんでした。データ管理からバックアップしてください。");
-      return;
+      state = JSON.parse(lastSavedState);
+      const quotaExceeded =
+        e.name === "QuotaExceededError" ||
+        e.name === "NS_ERROR_DOM_QUOTA_REACHED" ||
+        e.code === 22 ||
+        e.code === 1014;
+      saveError = quotaExceeded
+        ? "保存容量の上限に達しました。入力内容は画面に保持しています。空き容量を確保するか、入力画面を閉じる前に内容を控えてください。"
+        : "保存できませんでした。入力内容は画面に保持しています。ブラウザーの保存設定を確認してください。";
+      toast(saveError);
+      return false;
     }
-    if (message) toast(message);
+    saveError = "";
+    hasUnsavedChanges = false;
+    if (message) toast("保存完了：" + message);
+    return true;
   }
   function download(filename, text, type = "application/json") {
     const blob = new Blob(["\ufeff", text], { type: type + ";charset=utf-8" }),
@@ -184,22 +207,23 @@
     return `<div class="panel"><div class="panel-title"><h2>${title}</h2>${link}</div><div class="panel-body">${body}</div></div>`;
   }
   function renderDashboard() {
+    const activeGroups = state.groups.filter((g) => !g.archivedAt);
     const rate = D.completion(state),
-      budget = state.groups.reduce((n, g) => n + Number(g.budget), 0);
+      budget = activeGroups.reduce((n, g) => n + Number(g.budget), 0);
     return (
       head(
         "運営の今を、ひと目で。",
         "申請から当日の配置まで、チームの動きをここに。",
       ) +
       `<div class="hero"><div><div class="eyebrow">NOVEMBER 14 — 15, 2026</div><h2>つながるアイデア、広がるキャンパス。</h2><p>学園祭の準備状況を確認して、今日の一歩を進めましょう。</p></div><div class="hero-mark">26 / F</div></div>` +
-      `<div class="stats">${stat("出店申請", state.applications.length + "<small> 件</small>", "承認待ち " + D.pending(state) + " 件")}${stat("参加団体", state.groups.length + "<small> 団体</small>", "所属メンバー " + D.groupMembers(state) + " 名")}${stat("登録経費", money(D.expenses(state)), "総予算 " + money(budget))}${stat("タスク完了率", rate + "<small> %</small>", "期限超過 " + D.overdueTasks(state, today()).length + " 件")}</div>` +
+      `<div class="stats">${stat("出店申請", state.applications.length + "<small> 件</small>", "承認待ち " + D.pending(state) + " 件")}${stat("参加団体", activeGroups.length + "<small> 団体</small>", "所属メンバー " + D.groupMembers(state) + " 名")}${stat("登録経費", money(D.expenses(state)), "総予算 " + money(budget))}${stat("タスク完了率", rate + "<small> %</small>", "期限超過 " + D.overdueTasks(state, today()).length + " 件")}</div>` +
       `<div class="grid2">${panel(
         "承認待ちの出店申請",
         state.applications
           .filter((a) => a.status === "submitted")
           .map(
             (a) =>
-              `<div class="notice-row"><small>${esc(name("groups", a.groupId))} / ${esc(a.date)}</small><b>${esc(a.title)}</b>${badge(a.status)}</div>`,
+              `<div class="notice-row"><small>${groupLabel(a.groupId)} / ${esc(a.date)}</small><b>${esc(a.title)}</b>${badge(a.status)}</div>`,
           )
           .join("") || "<p>承認待ちの申請はありません。</p>",
         '<a href="#applications">申請一覧 →</a>',
@@ -209,12 +233,12 @@
           .slice(0, 3)
           .map(
             (n) =>
-              `<div class="notice-row"><small>${esc(n.date)} / ${n.groupId === "all" ? "全体" : esc(name("groups", n.groupId))}</small><b>${esc(n.title)}</b><span>${esc(n.body)}</span></div>`,
+              `<div class="notice-row"><small>${esc(n.date)} / ${n.groupId === "all" ? "全体" : groupLabel(n.groupId)}</small><b>${esc(n.title)}</b><span>${esc(n.body)}</span></div>`,
           )
           .join(""),
         '<a href="#notices">すべて見る →</a>',
       )}</div>` +
-      `<div class="grid2">${panel("団体別の予算残額", state.groups.map((g) => `<div class="metric-line"><span>${esc(g.name)}</span><b>${money(D.remaining(state, g.id))}</b></div><div class="progress"><span style="width:${Math.max(0, Math.min(100, ((g.budget - D.expenses(state, g.id)) / Math.max(1, g.budget)) * 100))}%"></span></div>`).join(""))}${panel(
+      `<div class="grid2">${panel("団体別の予算残額", activeGroups.map((g) => `<div class="metric-line"><span>${esc(g.name)}</span><b>${money(D.remaining(state, g.id))}</b></div><div class="progress"><span style="width:${Math.max(0, Math.min(100, ((g.budget - D.expenses(state, g.id)) / Math.max(1, g.budget)) * 100))}%"></span></div>`).join(""))}${panel(
         "最近の操作",
         state.activity
           .slice(0, 6)
@@ -236,6 +260,7 @@
           ["members", "人数"],
           ["budget", "予算"],
           ["_remaining", "残額"],
+          ["_archive", "状態"],
         ];
       case "applications":
         return [
@@ -309,12 +334,16 @@
   }
   function cell(r, k) {
     if (k === "groupId")
-      return r[k] === "all" ? "全体" : esc(name("groups", r[k]));
+      return r[k] === "all" ? "全体" : groupLabel(r[k]);
     if (k === "venueId") return esc(name("venues", r[k]));
     if (k === "equipmentId") return esc(name("equipment", r[k]));
     if (k === "status") return badge(r[k]);
     if (k === "amount" || k === "budget") return money(r[k]);
     if (k === "_remaining") return money(D.remaining(state, r.id));
+    if (k === "_archive")
+      return r.archivedAt
+        ? "削除済み " + esc(r.archivedAt.slice(0, 10).replace(/-/g, "/"))
+        : "登録中";
     if (k === "_time") return esc(r.start) + " – " + esc(r.end);
     if (k === "_hours") return D.shiftHours(r) + " h";
     if (k === "_late")
@@ -325,6 +354,14 @@
   }
   function renderList(p) {
     let rows = p === "notices" ? D.notices(state, state.groupId) : state[p];
+    if (p === "groups")
+      rows = rows.filter((group) =>
+        groupFilter === "all"
+          ? true
+          : groupFilter === "archived"
+            ? Boolean(group.archivedAt)
+            : !group.archivedAt,
+      );
     rows = D.search(rows, filterText);
     if (filterStatus) rows = rows.filter((r) => r.status === filterStatus);
     rows =
@@ -339,17 +376,17 @@
     if (p === "reservations")
       summary = `<div class="stats">${state.venues.map((v) => stat(esc(v.name), v.capacity + "<small> 名</small>", "予約 " + D.venueUsage(state, v.id) + " 件")).join("")}</div>`;
     if (p === "expenses")
-      summary = `<div class="stats">${stat("登録経費合計", money(D.expenses(state)), "全団体の経費")}${stat("総予算", money(state.groups.reduce((n, g) => n + Number(g.budget), 0)), "団体ごとの予算を合算")}</div>`;
+      summary = `<div class="stats">${stat("登録経費合計", money(D.expenses(state)), "全団体の経費")}${stat("総予算", money(state.groups.filter((g) => !g.archivedAt).reduce((n, g) => n + Number(g.budget), 0)), "登録中の団体の予算")}</div>`;
     const exportButton =
       '<button class="secondary" id="export-csv">CSV出力</button>';
     return (
       head(
         pages[p][1],
-        `${state[p].length}件の登録データ。検索・編集して準備を進めましょう。`,
+        `${rows.length}件を表示中。検索・編集して準備を進めましょう。`,
         `<button id="add-row">＋ 新規登録</button>`,
       ) +
       summary +
-      `<div class="toolbar"><div class="filters"><input id="search" type="search" aria-label="一覧を検索" placeholder="キーワードで検索" value="${esc(filterText)}">${statuses.length ? `<select id="status-filter" aria-label="状態で絞り込み"><option value="">すべての状態</option>${statuses.map((s) => `<option value="${s}" ${filterStatus === s ? "selected" : ""}>${labels[s] || s}</option>`).join("")}</select>` : ""}<select id="sort" aria-label="並び順">${cols
+      `<div class="toolbar"><div class="filters"><input id="search" type="search" aria-label="一覧を検索" placeholder="キーワードで検索" value="${esc(filterText)}">${p === "groups" ? `<select id="group-filter" aria-label="団体の表示"><option value="active" ${groupFilter === "active" ? "selected" : ""}>登録中</option><option value="archived" ${groupFilter === "archived" ? "selected" : ""}>削除済みの履歴</option><option value="all" ${groupFilter === "all" ? "selected" : ""}>すべて</option></select>` : ""}${statuses.length ? `<select id="status-filter" aria-label="状態で絞り込み"><option value="">すべての状態</option>${statuses.map((s) => `<option value="${s}" ${filterStatus === s ? "selected" : ""}>${labels[s] || s}</option>`).join("")}</select>` : ""}<select id="sort" aria-label="並び順">${cols
         .filter((c) => !c[0].startsWith("_"))
         .map(
           (c) =>
@@ -358,13 +395,13 @@
         .join(
           "",
         )}</select><span class="subtitle">${rows.length} 件表示</span></div>${exportButton}</div>` +
-      `<div class="panel"><div class="table-scroll"><table><thead><tr>${cols.map((c) => `<th>${c[1]}</th>`).join("")}<th>操作</th></tr></thead><tbody>${rows.length ? rows.map((r) => `<tr>${cols.map((c) => `<td class="${["title", "body", "name"].includes(c[0]) ? "description" : ""}">${cell(r, c[0])}</td>`).join("")}<td><div class="actions"><button class="secondary small" data-edit="${esc(r.id)}">編集</button>${p === "applications" ? `<button class="small" data-approve="${esc(r.id)}">承認</button><button class="danger small" data-cancel="${esc(r.id)}">取消</button>` : ""}${p === "loans" ? `<button class="small" data-return="${esc(r.id)}">返却</button>` : ""}${p === "tasks" ? `<button class="small" data-done="${esc(r.id)}">完了</button>` : ""}<button class="danger small" data-delete="${esc(r.id)}">削除</button></div></td></tr>`).join("") : `<tr><td colspan="${cols.length + 1}" class="empty">該当するデータはありません。</td></tr>`}</tbody></table></div></div>`
+      `<div class="panel"><div class="table-scroll"><table><thead><tr>${cols.map((c) => `<th>${c[1]}</th>`).join("")}<th>操作</th></tr></thead><tbody>${rows.length ? rows.map((r) => `<tr>${cols.map((c) => `<td class="${["title", "body", "name"].includes(c[0]) ? "description" : ""}">${cell(r, c[0])}</td>`).join("")}<td><div class="actions"><button class="secondary small" data-edit="${esc(r.id)}">編集</button>${p === "applications" ? `<button class="small" data-approve="${esc(r.id)}">承認</button><button class="danger small" data-cancel="${esc(r.id)}">取消</button>` : ""}${p === "loans" ? `<button class="small" data-return="${esc(r.id)}">返却</button>` : ""}${p === "tasks" ? `<button class="small" data-done="${esc(r.id)}">完了</button>` : ""}${p === "groups" ? (r.archivedAt ? `<button class="small" data-restore-group="${esc(r.id)}">復元</button>` : `<button class="danger small" data-delete="${esc(r.id)}">履歴へ</button>`) : `<button class="danger small" data-delete="${esc(r.id)}">削除</button>`}</div></td></tr>`).join("") : `<tr><td colspan="${cols.length + 1}" class="empty">該当するデータはありません。</td></tr>`}</tbody></table></div></div>`
     );
   }
   function renderSettings() {
     return (
       head("データを、手元に。", "保存・復元と、操作する団体を管理します。") +
-      `<div class="help">これはブラウザ内で動く演習用システムです。ログイン認証や共同データ保存はありません。役割・団体の切り替えは業務操作の体験用です。同じデータで確認するときはJSONファイルを共有してください。端末やブラウザが変わると保存先も変わります。</div><div class="settings-grid">${panel("バックアップ", '<p>現在の業務データをJSONファイルとして保存します。</p><button id="backup">JSONを書き出す</button>')}${panel("データを復元", '<p>JSONファイルを読み込み、現在のデータを置き換えます。</p><input id="restore-file" aria-label="復元するJSON" type="file" accept=".json"><button id="restore" class="secondary">読み込む</button>')}${panel("操作する団体", `<p>団体代表として表示する団体を選択します。</p><select id="current-group" aria-label="操作する団体">${state.groups.map((g) => `<option value="${g.id}" ${g.id === state.groupId ? "selected" : ""}>${esc(g.name)}</option>`).join("")}</select>`)}${panel("サンプルデータへ戻す", '<p>編集内容を破棄して、最初の状態に戻します。実行前にバックアップを保存してください。</p><button id="reset" class="danger">初期データへ戻す</button>')}</div>`
+      `<div class="help">これはブラウザ内で動く演習用システムです。ログイン認証や共同データ保存はありません。役割・団体の切り替えは業務操作の体験用です。同じデータで確認するときはJSONファイルを共有してください。端末やブラウザが変わると保存先も変わります。</div><div class="settings-grid">${panel("バックアップ", '<p>現在の業務データをJSONファイルとして保存します。</p><button id="backup">JSONを書き出す</button>')}${panel("データを復元", '<p>JSONファイルを読み込み、現在のデータを置き換えます。</p><input id="restore-file" aria-label="復元するJSON" type="file" accept=".json"><button id="restore" class="secondary">読み込む</button>')}${panel("操作する団体", `<p>団体代表として表示する団体を選択します。</p><select id="current-group" aria-label="操作する団体">${state.groups.filter((g) => !g.archivedAt).map((g) => `<option value="${g.id}" ${g.id === state.groupId ? "selected" : ""}>${esc(g.name)}</option>`).join("")}</select>`)}${panel("サンプルデータへ戻す", '<p>編集内容を破棄して、最初の状態に戻します。実行前にバックアップを保存してください。</p><button id="reset" class="danger">初期データへ戻す</button>')}</div>`
     );
   }
   function render() {
@@ -390,11 +427,16 @@
           : renderList(p));
     bind(p);
   }
-  function options(type) {
+  function options(type, selectedId) {
     if (type === "group" || type === "audience")
       return [
         ...(type === "audience" ? [["all", "全体"]] : []),
-        ...state.groups.map((g) => [g.id, g.name]),
+        ...state.groups
+          .filter((g) => !g.archivedAt || g.id === selectedId)
+          .map((g) => [
+            g.id,
+            g.name + (g.archivedAt ? "（削除済み）" : ""),
+          ]),
       ];
     if (type === "venue") return state.venues.map((v) => [v.id, v.name]);
     if (type === "equipment") return state.equipment.map((e) => [e.id, e.name]);
@@ -424,6 +466,7 @@
     let row = original ? D.editCopy(original) : {};
     if (p === "expenses" && original) row = D.expenseForEdit(original);
     editing = { p, id, row, original };
+    $("#form-status").textContent = "";
     $("#dialog-title").textContent =
       pages[p][1] + " / " + (id ? "編集" : "新規登録");
     $("#form-fields").innerHTML = fields[p]
@@ -436,7 +479,7 @@
         else if (["text", "number", "date", "time"].includes(type))
           input = `<input name="${k}" type="${type}" ${type === "number" ? 'step="any"' : ""} value="${esc(value)}" ${["title", "name"].includes(k) ? "required" : ""}>`;
         else
-          input = `<select name="${k}">${options(type)
+          input = `<select name="${k}">${          options(type, row[k])
             .map(
               ([v, t]) =>
                 `<option value="${esc(v)}" ${String(value) === v ? "selected" : ""}>${esc(t)}</option>`,
@@ -504,6 +547,11 @@
   function bind(p) {
     if (fields[p]) {
       $("#add-row").onclick = () => openEditor(p);
+      if (p === "groups")
+        $("#group-filter").onchange = (e) => {
+          groupFilter = e.target.value;
+          render();
+        };
       $("#search").oninput = (e) => {
         const pos = e.target.selectionStart;
         filterText = e.target.value;
@@ -535,10 +583,29 @@
       document.querySelectorAll("[data-delete]").forEach(
         (b) =>
           (b.onclick = () => {
-            if (!confirm("このデータを削除しますか？")) return;
-            if (p === "groups") D.deleteGroup(state, b.dataset.delete);
-            else state[p] = state[p].filter((r) => r.id !== b.dataset.delete);
-            save(pages[p][1] + "を削除しました");
+            if (
+              !confirm(
+                p === "groups"
+                  ? "この団体を一覧から外し、関連データとともに履歴として保存しますか？"
+                  : "このデータを削除しますか？",
+              )
+            )
+              return;
+            if (p === "groups") {
+              D.deleteGroup(state, b.dataset.delete);
+              if (state.groupId === b.dataset.delete)
+                state.groupId =
+                  state.groups.find((g) => !g.archivedAt)?.id || "";
+            } else state[p] = state[p].filter((r) => r.id !== b.dataset.delete);
+            save(p === "groups" ? "団体を履歴へ移動しました" : pages[p][1] + "を削除しました");
+            render();
+          }),
+      );
+      document.querySelectorAll("[data-restore-group]").forEach(
+        (b) =>
+          (b.onclick = () => {
+            D.restoreGroup(state, b.dataset.restoreGroup);
+            save("団体を一覧に復元しました");
             render();
           }),
       );
@@ -625,7 +692,7 @@
       };
       $("#current-group").onchange = (e) => {
         state.groupId = e.target.value;
-        save("操作する団体を変更しました");
+        if (!save("操作する団体を変更しました")) render();
       };
     }
   }
@@ -653,18 +720,37 @@
     if (p === "expenses") r.amount = D.roundedAmount(r.amount);
     if (id) state[p][state[p].findIndex((x) => x.id === id)] = r;
     else state[p].push(r);
-    save(pages[p][1] + "を保存しました");
+    if (!save(pages[p][1] + "を保存しました")) {
+      editing.saveFailed = true;
+      hasUnsavedChanges = true;
+      $("#form-status").textContent = saveError;
+      return;
+    }
     $("#editor").close();
     render();
   };
   function closeEditor() {
+    if (
+      editing?.saveFailed &&
+      !confirm("保存できていない入力があります。閉じると失われます。閉じますか？")
+    )
+      return;
+    hasUnsavedChanges = false;
     $("#editor").close();
     editing = null;
     render();
   }
   $("#close-dialog").onclick = closeEditor;
   $("#cancel-dialog").onclick = closeEditor;
-  $("#editor").addEventListener("cancel", () => {
+  $("#editor").addEventListener("cancel", (e) => {
+    if (
+      editing?.saveFailed &&
+      !confirm("保存できていない入力があります。閉じると失われます。閉じますか？")
+    ) {
+      e.preventDefault();
+      return;
+    }
+    hasUnsavedChanges = false;
     editing = null;
     setTimeout(render, 0);
   });
@@ -678,6 +764,11 @@
     filterStatus = "";
     sortKey = "id";
     render();
+  });
+  window.addEventListener("beforeunload", (e) => {
+    if (!hasUnsavedChanges) return;
+    e.preventDefault();
+    e.returnValue = "";
   });
   render();
 })();

@@ -119,8 +119,8 @@
     editCopy(row) {
       return row;
     },
-    roundedAmount(value) {
-      return Math.trunc(Number(value));
+    amountValue(value) {
+      return Number(value);
     },
     overdueTasks(s, today) {
       return s.tasks.filter((t) => D.overdue(t, today));

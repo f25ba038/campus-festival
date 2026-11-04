@@ -144,7 +144,10 @@
     return new Date().toLocaleDateString("sv-SE");
   }
   function money(n) {
-    return "¥" + Number(n).toLocaleString("ja-JP");
+    return (
+      "¥" +
+      Number(n).toLocaleString("ja-JP", { maximumFractionDigits: 20 })
+    );
   }
   function name(collection, id) {
     return state[collection].find((r) => r.id === id)?.name || "未設定";
@@ -717,7 +720,7 @@
       toast(error);
       return;
     }
-    if (p === "expenses") r.amount = D.roundedAmount(r.amount);
+    if (p === "expenses") r.amount = D.amountValue(r.amount);
     if (id) state[p][state[p].findIndex((x) => x.id === id)] = r;
     else state[p].push(r);
     if (!save(pages[p][1] + "を保存しました")) {

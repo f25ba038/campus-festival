@@ -22,6 +22,8 @@
     groupFilter = "active",
     sortKey = "id",
     editing = null,
+    saveError = "",
+    hasUnsavedChanges = false,
     toastTimer;
   try {
     const saved = localStorage.getItem(KEY);
@@ -33,6 +35,7 @@
     storageWarning =
       "保存済みデータを読み込めなかったため、初期データを表示しています。必要ならバックアップから復元してください。";
   }
+  let lastSavedState = JSON.stringify(state);
   const labels = {
     draft: "下書き",
     submitted: "承認待ち",
@@ -164,12 +167,26 @@
     state.activity.unshift({ at: new Date().toISOString(), message });
     state.activity = state.activity.slice(0, 100);
     try {
-      localStorage.setItem(KEY, JSON.stringify(state));
+      const serialized = JSON.stringify(state);
+      localStorage.setItem(KEY, serialized);
+      lastSavedState = serialized;
     } catch (e) {
-      toast("保存できませんでした。データ管理からバックアップしてください。");
-      return;
+      state = JSON.parse(lastSavedState);
+      const quotaExceeded =
+        e.name === "QuotaExceededError" ||
+        e.name === "NS_ERROR_DOM_QUOTA_REACHED" ||
+        e.code === 22 ||
+        e.code === 1014;
+      saveError = quotaExceeded
+        ? "保存容量の上限に達しました。入力内容は画面に保持しています。空き容量を確保するか、入力画面を閉じる前に内容を控えてください。"
+        : "保存できませんでした。入力内容は画面に保持しています。ブラウザーの保存設定を確認してください。";
+      toast(saveError);
+      return false;
     }
-    if (message) toast(message);
+    saveError = "";
+    hasUnsavedChanges = false;
+    if (message) toast("保存完了：" + message);
+    return true;
   }
   function download(filename, text, type = "application/json") {
     const blob = new Blob(["\ufeff", text], { type: type + ";charset=utf-8" }),
@@ -449,6 +466,7 @@
     let row = original ? D.editCopy(original) : {};
     if (p === "expenses" && original) row = D.expenseForEdit(original);
     editing = { p, id, row, original };
+    $("#form-status").textContent = "";
     $("#dialog-title").textContent =
       pages[p][1] + " / " + (id ? "編集" : "新規登録");
     $("#form-fields").innerHTML = fields[p]
@@ -674,7 +692,7 @@
       };
       $("#current-group").onchange = (e) => {
         state.groupId = e.target.value;
-        save("操作する団体を変更しました");
+        if (!save("操作する団体を変更しました")) render();
       };
     }
   }
@@ -702,18 +720,37 @@
     if (p === "expenses") r.amount = D.roundedAmount(r.amount);
     if (id) state[p][state[p].findIndex((x) => x.id === id)] = r;
     else state[p].push(r);
-    save(pages[p][1] + "を保存しました");
+    if (!save(pages[p][1] + "を保存しました")) {
+      editing.saveFailed = true;
+      hasUnsavedChanges = true;
+      $("#form-status").textContent = saveError;
+      return;
+    }
     $("#editor").close();
     render();
   };
   function closeEditor() {
+    if (
+      editing?.saveFailed &&
+      !confirm("保存できていない入力があります。閉じると失われます。閉じますか？")
+    )
+      return;
+    hasUnsavedChanges = false;
     $("#editor").close();
     editing = null;
     render();
   }
   $("#close-dialog").onclick = closeEditor;
   $("#cancel-dialog").onclick = closeEditor;
-  $("#editor").addEventListener("cancel", () => {
+  $("#editor").addEventListener("cancel", (e) => {
+    if (
+      editing?.saveFailed &&
+      !confirm("保存できていない入力があります。閉じると失われます。閉じますか？")
+    ) {
+      e.preventDefault();
+      return;
+    }
+    hasUnsavedChanges = false;
     editing = null;
     setTimeout(render, 0);
   });
@@ -727,6 +764,11 @@
     filterStatus = "";
     sortKey = "id";
     render();
+  });
+  window.addEventListener("beforeunload", (e) => {
+    if (!hasUnsavedChanges) return;
+    e.preventDefault();
+    e.returnValue = "";
   });
   render();
 })();

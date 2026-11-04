@@ -149,6 +149,19 @@
       Number(n).toLocaleString("ja-JP", { maximumFractionDigits: 20 })
     );
   }
+  function dateWithWeekday(value) {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+    if (!match) return esc(value);
+    const [, year, month, day] = match;
+    const date = new Date(Number(year), Number(month) - 1, Number(day));
+    if (
+      date.getFullYear() !== Number(year) ||
+      date.getMonth() !== Number(month) - 1 ||
+      date.getDate() !== Number(day)
+    )
+      return esc(value);
+    return `${esc(value)}（${"日月火水木金土"[date.getDay()]}）`;
+  }
   function name(collection, id) {
     return state[collection].find((r) => r.id === id)?.name || "未設定";
   }
@@ -342,6 +355,7 @@
     if (k === "equipmentId") return esc(name("equipment", r[k]));
     if (k === "status") return badge(r[k]);
     if (k === "amount" || k === "budget") return money(r[k]);
+    if (k === "date" || k === "due") return dateWithWeekday(r[k]);
     if (k === "_remaining") return money(D.remaining(state, r.id));
     if (k === "_archive")
       return r.archivedAt

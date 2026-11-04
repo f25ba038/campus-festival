@@ -45,16 +45,15 @@
       return e
         ? e.stock -
             s.loans
-              .filter((l) => l.equipmentId === id && l.status !== "reserved")
+              .filter((l) => l.equipmentId === id && l.status === "active")
               .reduce((n, l) => n + Number(l.quantity), 0)
         : 0;
     },
     returnLoan(s, id) {
       const l = s.loans.find((x) => x.id === id);
-      if (!l) return;
-      const e = s.equipment.find((x) => x.id === l.equipmentId);
-      e.stock += Number(l.quantity);
+      if (!l || l.status !== "active") return false;
       l.status = "returned";
+      return true;
     },
     validateExpense(r) {
       if (!Number.isFinite(Number(r.amount)))

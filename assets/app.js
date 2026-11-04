@@ -398,7 +398,7 @@
         .join(
           "",
         )}</select><span class="subtitle">${rows.length} 件表示</span></div>${exportButton}</div>` +
-      `<div class="panel"><div class="table-scroll"><table><thead><tr>${cols.map((c) => `<th>${c[1]}</th>`).join("")}<th>操作</th></tr></thead><tbody>${rows.length ? rows.map((r) => `<tr>${cols.map((c) => `<td class="${["title", "body", "name"].includes(c[0]) ? "description" : ""}">${cell(r, c[0])}</td>`).join("")}<td><div class="actions"><button class="secondary small" data-edit="${esc(r.id)}">編集</button>${p === "applications" ? `<button class="small" data-approve="${esc(r.id)}">承認</button><button class="danger small" data-cancel="${esc(r.id)}">取消</button>` : ""}${p === "loans" ? `<button class="small" data-return="${esc(r.id)}">返却</button>` : ""}${p === "tasks" ? `<button class="small" data-done="${esc(r.id)}">完了</button>` : ""}${p === "groups" ? (r.archivedAt ? `<button class="small" data-restore-group="${esc(r.id)}">復元</button>` : `<button class="danger small" data-delete="${esc(r.id)}">履歴へ</button>`) : `<button class="danger small" data-delete="${esc(r.id)}">削除</button>`}</div></td></tr>`).join("") : `<tr><td colspan="${cols.length + 1}" class="empty">該当するデータはありません。</td></tr>`}</tbody></table></div></div>`
+      `<div class="panel"><div class="table-scroll"><table><thead><tr>${cols.map((c) => `<th>${c[1]}</th>`).join("")}<th>操作</th></tr></thead><tbody>${rows.length ? rows.map((r) => `<tr>${cols.map((c) => `<td class="${["title", "body", "name"].includes(c[0]) ? "description" : ""}">${cell(r, c[0])}</td>`).join("")}<td><div class="actions"><button class="secondary small" data-edit="${esc(r.id)}">編集</button>${p === "applications" ? `<button class="small" data-approve="${esc(r.id)}">承認</button><button class="danger small" data-cancel="${esc(r.id)}">取消</button>` : ""}${p === "loans" && r.status === "active" ? `<button class="small" data-return="${esc(r.id)}">返却</button>` : ""}${p === "tasks" ? `<button class="small" data-done="${esc(r.id)}">完了</button>` : ""}${p === "groups" ? (r.archivedAt ? `<button class="small" data-restore-group="${esc(r.id)}">復元</button>` : `<button class="danger small" data-delete="${esc(r.id)}">履歴へ</button>`) : `<button class="danger small" data-delete="${esc(r.id)}">削除</button>`}</div></td></tr>`).join("") : `<tr><td colspan="${cols.length + 1}" class="empty">該当するデータはありません。</td></tr>`}</tbody></table></div></div>`
     );
   }
   function renderSettings() {
@@ -661,7 +661,10 @@
       document.querySelectorAll("[data-return]").forEach(
         (b) =>
           (b.onclick = () => {
-            D.returnLoan(state, b.dataset.return);
+            if (!D.returnLoan(state, b.dataset.return)) {
+              toast("この貸出は返却済みか、返却できる状態ではありません");
+              return;
+            }
             save("返却を記録しました");
             render();
           }),

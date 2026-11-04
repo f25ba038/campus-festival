@@ -133,6 +133,18 @@
     tasks: "T",
     notices: "N",
   };
+  const approvalFields = [
+    "title",
+    "groupId",
+    "venueId",
+    "date",
+    "start",
+    "end",
+    "attendees",
+  ];
+  const applicationFields = fields.applications
+    .map(([key]) => key)
+    .filter((key) => key !== "status");
   function page() {
     return location.hash.slice(1).split("?")[0] || "dashboard";
   }
@@ -144,6 +156,95 @@
   }
   function name(collection, id) {
     return state[collection].find((r) => r.id === id)?.name || "未設定";
+  }
+  function applicationValues(row, keys = applicationFields) {
+    return Object.fromEntries(keys.map((key) => [key, row[key]]));
+  }
+  function sameApplicationValues(a, b, keys = approvalFields) {
+    return keys.every((key) => a[key] === b[key]);
+  }
+  function applicationVenueConflict(application, reservationId) {
+    return state.reservations.some(
+      (reservation) =>
+        reservation.id !== reservationId &&
+        reservation.status !== "cancelled" &&
+        reservation.venueId === application.venueId &&
+        reservation.date === application.date &&
+        application.start < reservation.end &&
+        reservation.start < application.end,
+    );
+  }
+  function changeFieldValue(key, value) {
+    if (key === "groupId") return name("groups", value);
+    if (key === "venueId") return name("venues", value);
+    return value ?? "—";
+  }
+  function applicationChangeHistory(row) {
+    if (!row.changeHistory?.length) return "—";
+    return `<details><summary>${row.changeHistory.length}件</summary>${row.changeHistory
+      .map((change) => {
+        const differences = approvalFields
+          .filter((key) => change.before[key] !== change.after[key])
+          .map(
+            (key) =>
+              `<div>${esc(fields.applications.find((field) => field[0] === key)?.[1] || key)}: ${esc(changeFieldValue(key, change.before[key]))} → ${esc(changeFieldValue(key, change.after[key]))}</div>`,
+          )
+          .join("");
+        return `<div class="notice-row"><small>${esc(new Date(change.at).toLocaleString("ja-JP"))} / ${esc(change.status)}</small>${differences}</div>`;
+      })
+      .join("")}</details>`;
+  }
+  function approveApplication(application) {
+    const pending = application.pendingChanges;
+    const candidate = pending
+      ? { ...application, ...pending.after, status: "approved" }
+      : application;
+    const timeError = D.validateTime(candidate);
+    if (timeError) return timeError;
+    const venue = state.venues.find((item) => item.id === candidate.venueId);
+    if (
+      venue &&
+      D.capacityExceeded(candidate.attendees, venue.capacity)
+    )
+      return "会場の定員を超えています";
+    const reservation = state.reservations.find(
+      (item) =>
+        item.applicationId === application.id && item.status !== "cancelled",
+    );
+    if (applicationVenueConflict(candidate, reservation?.id))
+      return "会場予約が重複しています";
+    if (!pending) {
+      D.approve(state, application.id);
+      return "";
+    }
+    Object.assign(application, pending.after, { status: "approved" });
+    delete application.pendingChanges;
+    if (reservation) {
+      Object.assign(reservation, {
+        groupId: application.groupId,
+        venueId: application.venueId,
+        date: application.date,
+        start: application.start,
+        end: application.end,
+        attendees: application.attendees,
+        status: "approved",
+      });
+    } else {
+      state.reservations.push({
+        id: D.nextId(state.reservations, "R"),
+        applicationId: application.id,
+        groupId: application.groupId,
+        venueId: application.venueId,
+        date: application.date,
+        start: application.start,
+        end: application.end,
+        attendees: application.attendees,
+        status: "approved",
+      });
+    }
+    if (application.changeHistory?.[pending.historyIndex])
+      application.changeHistory[pending.historyIndex].status = "承認済み";
+    return "";
   }
   function badge(v) {
     return `<span class="badge ${esc(v)}">${esc(labels[v] || v)}</span>`;
@@ -247,6 +348,7 @@
           ["_time", "時間"],
           ["attendees", "人数"],
           ["status", "状態"],
+          ["_changeHistory", "重要項目の変更履歴"],
         ];
       case "reservations":
         return [
@@ -312,7 +414,11 @@
       return r[k] === "all" ? "全体" : esc(name("groups", r[k]));
     if (k === "venueId") return esc(name("venues", r[k]));
     if (k === "equipmentId") return esc(name("equipment", r[k]));
-    if (k === "status") return badge(r[k]);
+    if (k === "status")
+      return r.pendingChanges
+        ? '<span class="badge submitted">再承認待ち</span>'
+        : badge(r[k]);
+    if (k === "_changeHistory") return applicationChangeHistory(r);
     if (k === "amount" || k === "budget") return money(r[k]);
     if (k === "_remaining") return money(D.remaining(state, r.id));
     if (k === "_time") return esc(r.start) + " – " + esc(r.end);
@@ -421,7 +527,12 @@
   }
   function openEditor(p, id) {
     const original = id ? state[p].find((r) => r.id === id) : null;
-    let row = original ? D.editCopy(original) : {};
+    let row =
+      original && p === "applications"
+        ? { ...original, ...(original.pendingChanges?.after || {}) }
+        : original
+          ? D.editCopy(original)
+          : {};
     if (p === "expenses" && original) row = D.expenseForEdit(original);
     editing = { p, id, row, original };
     $("#dialog-title").textContent =
@@ -442,6 +553,12 @@
                 `<option value="${esc(v)}" ${String(value) === v ? "selected" : ""}>${esc(t)}</option>`,
             )
             .join("")}</select>`;
+        if (
+          p === "applications" &&
+          k === "status" &&
+          (original?.status === "approved" || original?.pendingChanges)
+        )
+          input = input.replace("<select ", "<select disabled ");
         return `<div class="field"><label for="field-${k}">${label}</label>${input.replace('name="' + k + '"', 'id="field-' + k + '" name="' + k + '"')}</div>`;
       })
       .join("");
@@ -552,16 +669,11 @@
             const a = state.applications.find(
               (x) => x.id === b.dataset.approve,
             );
-            const err = D.validateTime(a);
-            if (err) {
-              toast(err);
+            const error = approveApplication(a);
+            if (error) {
+              toast(error);
               return;
             }
-            if (D.venueConflict(state, a)) {
-              toast("会場予約が重複しています");
-              return;
-            }
-            D.approve(state, b.dataset.approve);
             save("出店を承認し、会場を予約しました");
             render();
           }),
@@ -570,7 +682,25 @@
         (b) =>
           (b.onclick = () => {
             if (!confirm("出店を取り消しますか？")) return;
+            const application = state.applications.find(
+              (item) => item.id === b.dataset.cancel,
+            );
+            if (application.pendingChanges) {
+              const history =
+                application.changeHistory?.[
+                  application.pendingChanges.historyIndex
+                ];
+              if (history) history.status = "取消";
+              delete application.pendingChanges;
+            }
             D.cancelApplication(state, b.dataset.cancel);
+            state.reservations
+              .filter(
+                (reservation) =>
+                  reservation.applicationId === b.dataset.cancel &&
+                  reservation.status !== "cancelled",
+              )
+              .forEach((reservation) => (reservation.status = "cancelled"));
             save("出店を取り消しました");
             render();
           }),
@@ -651,7 +781,60 @@
       return;
     }
     if (p === "expenses") r.amount = D.roundedAmount(r.amount);
-    if (id) state[p][state[p].findIndex((x) => x.id === id)] = r;
+    if (p === "applications" && editing.original) {
+      const original = editing.original;
+      const oldPending = original.pendingChanges;
+      const baseline = applicationValues(original, approvalFields);
+      const proposed = applicationValues(r);
+      const proposedCritical = applicationValues(r, approvalFields);
+      if (
+        original.status === "approved" ||
+        oldPending
+      ) {
+        if (!sameApplicationValues(proposedCritical, baseline)) {
+          if (oldPending) {
+            const previousHistory =
+              original.changeHistory?.[oldPending.historyIndex];
+            if (previousHistory) previousHistory.status = "差し替え";
+            original.changeHistory ||= [];
+            original.changeHistory.push({
+              at: new Date().toISOString(),
+              before: applicationValues(oldPending.after, approvalFields),
+              after: proposedCritical,
+              status: "再承認待ち",
+            });
+            original.pendingChanges = {
+              after: proposed,
+              historyIndex: original.changeHistory.length - 1,
+            };
+          } else {
+            original.changeHistory ||= [];
+            original.changeHistory.push({
+              at: new Date().toISOString(),
+              before: baseline,
+              after: proposedCritical,
+              status: "再承認待ち",
+            });
+            original.pendingChanges = {
+              after: proposed,
+              historyIndex: original.changeHistory.length - 1,
+            };
+          }
+          original.status = "submitted";
+        } else {
+          if (oldPending) {
+            const pendingHistory =
+              original.changeHistory?.[oldPending.historyIndex];
+            if (pendingHistory) pendingHistory.status = "撤回";
+            delete original.pendingChanges;
+            original.status = "approved";
+          }
+          Object.assign(original, proposed);
+        }
+      } else {
+        Object.assign(original, r);
+      }
+    } else if (id) state[p][state[p].findIndex((x) => x.id === id)] = r;
     else state[p].push(r);
     save(pages[p][1] + "を保存しました");
     $("#editor").close();

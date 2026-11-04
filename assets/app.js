@@ -689,14 +689,24 @@
         }
         try {
           const data = JSON.parse((await file.text()).replace(/^\uFEFF/, ""));
-          if (!D.validateImport(data) || !D.validateUniqueIds(data))
+          if (!D.validateImport(data))
             throw Error("形式が不正です");
           if (!confirm("現在のデータを置き換えますか？")) return;
-          state = data;
-          save("バックアップを復元しました");
+          const restored = structuredClone(data);
+          restored.activity.unshift({
+            at: new Date().toISOString(),
+            message: "バックアップを復元しました",
+          });
+          restored.activity = restored.activity.slice(0, 100);
+          const serialized = JSON.stringify(restored);
+          localStorage.setItem(KEY, serialized);
+          state = restored;
+          lastSavedState = serialized;
+          storageWarning = "";
+          toast("保存完了：バックアップを復元しました");
           render();
         } catch (e) {
-          toast("読み込めませんでした：" + e.message);
+          toast("バックアップを復元できませんでした。現在のデータは変更されていません。 " + e.message);
         }
       };
       $("#reset").onclick = () => {

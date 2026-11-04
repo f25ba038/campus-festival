@@ -24,7 +24,7 @@
     },
     remaining(s, groupId) {
       const g = s.groups.find((g) => g.id === groupId);
-      return (g?.budget || 50000) - D.expenses(s);
+      return (g?.budget || 50000) - D.expenses(s, groupId);
     },
     venueConflict(s, r) {
       return s.reservations.some(
@@ -90,7 +90,15 @@
       if (a) a.status = "cancelled";
     },
     deleteGroup(s, id) {
-      s.groups = s.groups.filter((g) => g.id !== id);
+      const group = s.groups.find((g) => g.id === id);
+      if (!group || group.archivedAt) return false;
+      group.archivedAt = new Date().toISOString();
+      return true;
+    },
+    restoreGroup(s, id) {
+      const group = s.groups.find((g) => g.id === id);
+      if (!group || !group.archivedAt) return false;
+      delete group.archivedAt;
       return true;
     },
     nextId(rows, prefix) {
@@ -141,7 +149,9 @@
       ).length;
     },
     groupMembers(s) {
-      return s.groups.reduce((n, g) => n + Number(g.members), 0);
+      return s.groups
+        .filter((g) => !g.archivedAt)
+        .reduce((n, g) => n + Number(g.members), 0);
     },
     taskOrder(rows) {
       return [...rows].sort((a, b) => a.due.localeCompare(b.due));

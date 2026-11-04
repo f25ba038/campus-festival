@@ -494,6 +494,16 @@
     $("#editor").showModal();
   }
   function validate(p, r) {
+    const original = p === "applications"
+      ? state.applications.find((application) => application.id === r.id)
+      : null;
+    if (
+      p === "applications" &&
+      r.status === "approved" &&
+      !D.canApprove(state.role) &&
+      original?.status !== "approved"
+    )
+      return "実行委員のみ出店申請を承認できます";
     if (
       !D.validateRequired(
         r,
@@ -631,7 +641,10 @@
               toast("会場予約が重複しています");
               return;
             }
-            D.approve(state, b.dataset.approve);
+            if (!D.approve(state, b.dataset.approve)) {
+              toast("実行委員のみ出店申請を承認できます");
+              return;
+            }
             save("出店を承認し、会場を予約しました");
             render();
           }),

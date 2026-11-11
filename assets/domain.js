@@ -130,8 +130,11 @@
       return true;
     },
     validateExpense(r) {
-      if (!Number.isFinite(Number(r.amount)))
+      const amount = Number(r.amount);
+      if (!Number.isFinite(amount))
         return "金額は数値で入力してください";
+      if (amount <= 0 || D.roundedAmount(amount) <= 0)
+        return "金額は1円以上の数値を入力してください";
       return "";
     },
     validateTime(r) {

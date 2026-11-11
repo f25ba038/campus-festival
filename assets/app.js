@@ -734,6 +734,12 @@
         return `<div class="field"><label for="field-${k}">${label}</label>${input.replace('name="' + k + '"', 'id="field-' + k + '" name="' + k + '"')}</div>`;
       })
       .join("");
+    if (p === "expenses") {
+      const amountInput = $('#form-fields [name="amount"]');
+      amountInput.setCustomValidity(
+        D.validateExpense({ amount: amountInput.value }),
+      );
+    }
     $("#editor").showModal();
   }
   function validate(p, r) {
@@ -980,6 +986,18 @@
     }
   }
   $("#edit-form").addEventListener("input", (e) => {
+    if (editing?.p === "expenses" && e.target.name === "amount") {
+      const error = D.validateExpense({ amount: e.target.value });
+      e.target.setCustomValidity(error);
+      if (error && e.target.value) toast(error);
+      else if (
+        !error &&
+        $("#toast").textContent === "金額は1円以上の数値を入力してください"
+      ) {
+        clearTimeout(toastTimer);
+        $("#toast").style.display = "none";
+      }
+    }
     if (editing?.original && e.target.name && editing.p !== "expenses")
       editing.row[e.target.name] =
         e.target.name === "budget" && e.target.value === ""

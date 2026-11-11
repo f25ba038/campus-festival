@@ -250,6 +250,16 @@
       )
         return false;
 
+      if (
+        data.applications.some(
+          (a) =>
+            (a.reapprovalPending !== undefined &&
+              typeof a.reapprovalPending !== "boolean") ||
+            (a.changeHistory !== undefined && !Array.isArray(a.changeHistory)),
+        )
+      )
+        return false;
+
       return D.validateUniqueIds(data);
     },
     validateUniqueIds(data) {
@@ -310,15 +320,64 @@
     taskOrder(rows) {
       return [...rows].sort((a, b) => a.due.localeCompare(b.due));
     },
+    // 承認後に変更すると再承認が必要になる重要項目（会場予約へ反映される項目）
+    reapprovalFields: ["groupId", "venueId", "date", "start", "end", "attendees"],
+    // 承認済み申請の変更履歴に記録する項目
+    trackedApplicationFields: [
+      "title",
+      "groupId",
+      "venueId",
+      "date",
+      "start",
+      "end",
+      "attendees",
+      "note",
+    ],
+    applicationChanges(before, after) {
+      return D.trackedApplicationFields
+        .filter((k) => String(before[k] ?? "") !== String(after[k] ?? ""))
+        .map((k) => ({
+          field: k,
+          before: before[k] ?? "",
+          after: after[k] ?? "",
+        }));
+    },
+    // 承認済み（または再承認待ち）の申請を編集したときの処理。
+    // 重要項目が変わった場合は承認を外し、関連する会場予約を再承認まで取り消す。
+    applyApplicationEdit(s, before, after) {
+      if (!before) return false;
+      const changes = D.applicationChanges(before, after);
+      const wasApproved = before.status === "approved";
+      const reapproval =
+        wasApproved &&
+        changes.some((c) => D.reapprovalFields.includes(c.field));
+      if (reapproval) {
+        after.status = "submitted";
+        after.reapprovalPending = true;
+        s.reservations.forEach((r) => {
+          if (r.applicationId === after.id && r.status !== "cancelled")
+            r.status = "cancelled";
+        });
+      }
+      if ((wasApproved || before.reapprovalPending) && changes.length)
+        after.changeHistory = [
+          ...(before.changeHistory || []),
+          {
+            at: new Date().toISOString(),
+            role: s.role,
+            type: reapproval ? "reapprovalRequired" : "edited",
+            changes,
+          },
+        ];
+      return reapproval;
+    },
     approve(s, id) {
       if (!D.canApprove(s.role)) return false;
       const a = s.applications.find((a) => a.id === id);
       if (!a || a.status === "approved" || a.status === "cancelled")
         return false;
       a.status = "approved";
-      s.reservations.push({
-        id: D.nextId(s.reservations, "R"),
-        applicationId: a.id,
+      const values = {
         venueId: a.venueId,
         groupId: a.groupId,
         date: a.date,
@@ -326,7 +385,28 @@
         end: a.end,
         attendees: a.attendees,
         status: "approved",
-      });
+      };
+      // 既に関連する予約があれば重複させず、承認した申請内容で更新する
+      const linked = s.reservations.find((r) => r.applicationId === a.id);
+      if (linked) Object.assign(linked, values);
+      else
+        s.reservations.push({
+          id: D.nextId(s.reservations, "R"),
+          applicationId: a.id,
+          ...values,
+        });
+      if (a.reapprovalPending) {
+        delete a.reapprovalPending;
+        a.changeHistory = [
+          ...(a.changeHistory || []),
+          {
+            at: new Date().toISOString(),
+            role: s.role,
+            type: "reapproved",
+            changes: [],
+          },
+        ];
+      }
       return true;
     },
     validateRequired(r, fields) {

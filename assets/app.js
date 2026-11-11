@@ -21,6 +21,7 @@
     filterStatus = "",
     groupFilter = "active",
     sortKey = "id",
+    loanDate = today(),
     editing = null,
     saveError = "",
     hasUnsavedChanges = false,
@@ -395,7 +396,7 @@
       statuses = [...new Set(state[p].map((r) => r.status).filter(Boolean))];
     let summary = "";
     if (p === "loans")
-      summary = `<div class="stats">${state.equipment.map((e) => stat(esc(e.name), D.available(state, e.id) + "<small> / " + e.stock + "</small>", "貸出可能 / 台帳数")).join("")}</div>`;
+      summary = `<div class="toolbar"><label class="filters">対象日 <input id="loan-date" type="date" aria-label="貸出可能数の対象日" value="${esc(loanDate)}"></label></div><div class="stats">${state.equipment.map((e) => stat(esc(e.name), D.available(state, e.id, loanDate) + "<small> / " + e.stock + "</small>", "貸出可能 / 台帳数（" + dateWithWeekday(loanDate) + "時点・予約と貸出中を除く）")).join("")}</div>`;
     if (p === "reservations")
       summary = `<div class="stats">${state.venues.map((v) => stat(esc(v.name), v.capacity + "<small> 名</small>", "予約 " + D.venueUsage(state, v.id) + " 件")).join("")}</div>`;
     if (p === "expenses")
@@ -490,6 +491,8 @@
     if (p === "expenses" && original) row = D.expenseForEdit(original);
     // 保存前の入力で承認済み申請そのものが書き換わらないよう、複製を編集する
     if (p === "applications" && original) row = { ...original };
+    // 貸出可能数を超えて保存できなかった数量が画面上の貸出に残らないよう、複製を編集する
+    if (p === "loans" && original) row = { ...original };
     editing = { p, id, row, original };
     $("#form-status").textContent = "";
     $("#dialog-title").textContent =
@@ -621,14 +624,7 @@
     if (p === "loans") {
       const err = D.validateQuantity(r.quantity);
       if (err) return err;
-      const previous = state.loans.find((l) => l.id === r.id);
-      const allowance =
-        D.available(state, r.equipmentId) +
-        (previous &&
-        previous.equipmentId === r.equipmentId &&
-        previous.status !== "reserved"
-          ? Number(previous.quantity)
-          : 0);
+      const allowance = D.available(state, r.equipmentId, r.due, r.id);
       if (r.status !== "returned" && r.quantity > allowance)
         return "貸出可能数を超えています";
     }
@@ -658,6 +654,11 @@
         sortKey = e.target.value;
         render();
       };
+      if ($("#loan-date"))
+        $("#loan-date").onchange = (e) => {
+          loanDate = e.target.value || today();
+          render();
+        };
       $("#export-csv").onclick = () =>
         download(
           p + ".csv",

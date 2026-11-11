@@ -110,10 +110,20 @@
       return prefix + String(suffix).padStart(2, "0");
     },
     csv(rows, keys) {
+      const escape = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
       return [
-        keys.join(","),
-        ...rows.map((r) => keys.map((k) => String(r[k] ?? "")).join(",")),
+        keys.map(escape).join(","),
+        ...rows.map((r) => keys.map((k) => escape(r[k])).join(",")),
       ].join("\r\n");
+    },
+    publicSponsors(rows) {
+      return rows
+        .filter((row) => row.publicPermission === "approved")
+        .map(({ name, description, website }) => ({
+          name,
+          description,
+          website,
+        }));
     },
     validateImport(data) {
       if (
@@ -133,6 +143,13 @@
           representative: "string",
           members: "number",
           budget: "number",
+        },
+        sponsors: {
+          id: "string",
+          name: "string",
+          description: "text",
+          website: "text",
+          publicPermission: ["unset", "denied", "approved"],
         },
         venues: { id: "string", name: "string", capacity: "number" },
         applications: {
@@ -218,6 +235,8 @@
         /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value);
 
       for (const [collection, schema] of Object.entries(schemas)) {
+        if (collection === "sponsors" && data.sponsors === undefined)
+          continue;
         if (
           !Array.isArray(data[collection]) ||
           !data[collection].every((row) => {
@@ -255,6 +274,7 @@
     validateUniqueIds(data) {
       const collections = [
         "groups",
+        ...(Array.isArray(data.sponsors) ? ["sponsors"] : []),
         "venues",
         "applications",
         "reservations",

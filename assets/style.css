@@ -529,6 +529,33 @@ dialog::backdrop {
   cursor: pointer;
   color: var(--green);
 }
+.public-sponsors-page {
+  min-height: 100vh;
+}
+.public-sponsors-page main {
+  margin: 0 auto;
+  max-width: 900px;
+  padding: 48px 24px;
+}
+.public-sponsors-page header {
+  height: auto;
+  display: block;
+  border: 0;
+  letter-spacing: 0;
+}
+.sponsor-card {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 22px;
+  margin: 14px 0;
+}
+.sponsor-card h2 {
+  margin-bottom: 10px;
+}
+.sponsor-card p {
+  white-space: pre-wrap;
+}
 @media (max-width: 1100px) {
   main {
     padding: 0 24px;

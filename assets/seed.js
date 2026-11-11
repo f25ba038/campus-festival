@@ -209,6 +209,22 @@
         status: "returned",
       },
     ],
+    sponsors: [
+      {
+        id: "SP01",
+        name: "サンプル協賛先（未設定）",
+        description: "",
+        website: "",
+        publicPermission: "unset",
+      },
+      {
+        id: "SP02",
+        name: "サンプル協賛先（未許可）",
+        description: "",
+        website: "",
+        publicPermission: "denied",
+      },
+    ],
     expenses: [
       {
         id: "X01",

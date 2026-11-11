@@ -264,7 +264,8 @@
           (a) =>
             (a.reapprovalPending !== undefined &&
               typeof a.reapprovalPending !== "boolean") ||
-            (a.changeHistory !== undefined && !Array.isArray(a.changeHistory)),
+            (a.changeHistory !== undefined && !Array.isArray(a.changeHistory)) ||
+            (a.rejectReason !== undefined && typeof a.rejectReason !== "string"),
         )
       )
         return false;
@@ -379,6 +380,28 @@
           },
         ];
       return reapproval;
+    },
+    // 承認待ちの申請を理由付きで差し戻し、理由を申請の履歴にも残す
+    reject(s, id, reason) {
+      if (!D.canApprove(s.role)) return "実行委員のみ差し戻しできます";
+      const a = s.applications.find((a) => a.id === id);
+      if (!a || a.status !== "submitted")
+        return "承認待ちの申請のみ差し戻しできます";
+      const text = String(reason ?? "").trim();
+      if (!text) return "差し戻し理由を入力してください";
+      a.status = "rejected";
+      a.rejectReason = text;
+      a.changeHistory = [
+        ...(a.changeHistory || []),
+        {
+          at: new Date().toISOString(),
+          role: s.role,
+          type: "rejected",
+          reason: text,
+          changes: [],
+        },
+      ];
+      return "";
     },
     approve(s, id) {
       if (!D.canApprove(s.role)) return false;

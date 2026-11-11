@@ -353,7 +353,13 @@
       return r[k] === "all" ? "全体" : groupLabel(r[k]);
     if (k === "venueId") return esc(name("venues", r[k]));
     if (k === "equipmentId") return esc(name("equipment", r[k]));
-    if (k === "status") return badge(r[k]);
+    if (k === "status")
+      return (
+        badge(r[k]) +
+        (r.reapprovalPending && r.status !== "approved"
+          ? ' <span class="badge submitted">再承認待ち</span>'
+          : "")
+      );
     if (k === "amount" || k === "budget") return money(r[k]);
     if (k === "date" || k === "due") return dateWithWeekday(r[k]);
     if (k === "_remaining") return money(D.remaining(state, r.id));
@@ -482,6 +488,8 @@
     const original = id ? state[p].find((r) => r.id === id) : null;
     let row = original ? D.editCopy(original) : {};
     if (p === "expenses" && original) row = D.expenseForEdit(original);
+    // 保存前の入力で承認済み申請そのものが書き換わらないよう、複製を編集する
+    if (p === "applications" && original) row = { ...original };
     editing = { p, id, row, original };
     $("#form-status").textContent = "";
     $("#dialog-title").textContent =
@@ -504,8 +512,44 @@
             .join("")}</select>`;
         return `<div class="field"><label for="field-${k}">${label}</label>${input.replace('name="' + k + '"', 'id="field-' + k + '" name="' + k + '"')}</div>`;
       })
-      .join("");
+      .join("") + (p === "applications" ? applicationHistory(original) : "");
     $("#editor").showModal();
+  }
+  function applicationHistory(a) {
+    const notice =
+      a?.status === "approved"
+        ? '<div class="help">承認済みです。会場・開催日・時刻・団体・人数を変更すると、再承認が完了するまで承認待ちとなり、関連する会場予約は取り消されます。</div>'
+        : a?.reapprovalPending
+          ? '<div class="help">重要項目が変更されたため再承認待ちです。実行委員が一覧の「承認」ボタンで再承認すると、会場予約に変更内容が反映されます。</div>'
+          : "";
+    const history = a?.changeHistory || [];
+    if (!history.length) return notice;
+    const roles = { admin: "実行委員", leader: "団体代表", staff: "一般スタッフ" };
+    const types = {
+      reapprovalRequired: "重要項目の変更（再承認が必要）",
+      edited: "変更",
+      reapproved: "再承認",
+    };
+    const label = (k) =>
+      fields.applications.find((f) => f[0] === k)?.[1] || k;
+    const value = (k, v) =>
+      k === "venueId"
+        ? esc(name("venues", v))
+        : k === "groupId"
+          ? groupLabel(v)
+          : k === "date"
+            ? dateWithWeekday(v)
+            : esc(v);
+    return (
+      notice +
+      `<div class="field"><label>変更履歴</label><div>${[...history]
+        .reverse()
+        .map(
+          (h) =>
+            `<div class="notice-row"><small>${esc(new Date(h.at).toLocaleString("ja-JP"))} / ${esc(roles[h.role] || h.role)}</small><b>${esc(types[h.type] || h.type)}</b>${(h.changes || []).map((c) => `<div>${esc(label(c.field))}：${value(c.field, c.before)} → ${value(c.field, c.after)}</div>`).join("")}</div>`,
+        )
+        .join("")}</div></div>`
+    );
   }
   function validate(p, r) {
     const original = p === "applications"
@@ -518,6 +562,12 @@
       original?.status !== "approved"
     )
       return "実行委員のみ出店申請を承認できます";
+    if (
+      p === "applications" &&
+      r.status === "approved" &&
+      original?.status !== "approved"
+    )
+      return "承認（再承認）は一覧の「承認」ボタンから行ってください";
     if (
       !D.validateRequired(
         r,
@@ -551,6 +601,19 @@
           return "会場の定員を超えています";
         if (p === "reservations" && D.venueConflict(state, r))
           return "会場の予約時間が重複しています";
+        if (p === "reservations" && r.applicationId && r.status !== "cancelled") {
+          const linked = state.applications.find(
+            (a) => a.id === r.applicationId,
+          );
+          if (
+            linked &&
+            (linked.status !== "approved" ||
+              D.reapprovalFields.some(
+                (k) => String(linked[k]) !== String(r[k]),
+              ))
+          )
+            return "出店申請に紐づく予約は、承認済みの申請と同じ内容にしてください。会場・日時の変更は出店申請から行ってください";
+        }
       }
       if (p === "shifts" && D.shiftConflict(state, r))
         return "スタッフの担当時間が重複しています";
@@ -761,9 +824,19 @@
       return;
     }
     if (p === "expenses") r.amount = D.amountValue(r.amount);
+    const reapproval =
+      p === "applications" && id
+        ? D.applyApplicationEdit(state, editing.original, r)
+        : false;
     if (id) state[p][state[p].findIndex((x) => x.id === id)] = r;
     else state[p].push(r);
-    if (!save(pages[p][1] + "を保存しました")) {
+    if (
+      !save(
+        reapproval
+          ? "重要項目が変更されたため、再承認待ちにしました（会場予約は再承認まで取消）"
+          : pages[p][1] + "を保存しました",
+      )
+    ) {
       editing.saveFailed = true;
       hasUnsavedChanges = true;
       $("#form-status").textContent = saveError;

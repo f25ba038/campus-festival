@@ -123,6 +123,8 @@
       ["date", "担当日", "date"],
       ["start", "開始時刻", "time"],
       ["end", "終了時刻", "time"],
+      ["breakStart", "休憩開始（任意）", "time"],
+      ["breakEnd", "休憩終了（任意）", "time"],
       ["location", "担当場所", "text"],
     ],
     tasks: [
@@ -453,6 +455,7 @@
           ["groupId", "団体"],
           ["date", "担当日"],
           ["_time", "時間"],
+          ["_break", "休憩"],
           ["location", "担当場所"],
           ["_hours", "時間数"],
         ];
@@ -496,6 +499,10 @@
         ? "削除済み " + esc(r.archivedAt.slice(0, 10).replace(/-/g, "/"))
         : "登録中";
     if (k === "_time") return esc(r.start) + " – " + esc(r.end);
+    if (k === "_break")
+      return r.breakStart && r.breakEnd
+        ? esc(r.breakStart) + " – " + esc(r.breakEnd)
+        : "なし";
     if (k === "_hours") return D.shiftHours(r) + " h";
     if (k === "_late")
       return D.loanOverdue(r, today())
@@ -542,6 +549,22 @@
     };
     $("#delete-confirm").showModal();
   }
+  function shiftCoverageSummary() {
+    const dates = [...new Set(state.shifts.map((shift) => shift.date))].sort();
+    const tables = dates
+      .map((date) => {
+        const coverage = D.shiftCoverage(state.shifts, date);
+        const rows = coverage
+          .map(
+            (band) =>
+              `<tr><td>${esc(band.start)} – ${esc(band.end)}</td><td>${band.staffingCount} 名</td><td>${band.breakCount} 名</td><td>${band.scheduledCount} 名</td></tr>`,
+          )
+          .join("");
+        return `<h3>${dateWithWeekday(date)}</h3><div class="table-scroll"><table><thead><tr><th>時間帯</th><th>配置人数</th><th>休憩中</th><th>シフト人数</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+      })
+      .join("");
+    return `<div class="panel shift-coverage"><div class="panel-title"><h2>時間帯ごとの配置人数</h2></div><div class="panel-body"><p class="subtitle">休憩中のスタッフは配置人数に含みません。</p>${tables || '<p class="empty">登録されたシフトはありません。</p>'}</div></div>`;
+  }
   function renderList(p) {
     let rows = p === "notices" ? D.notices(state, state.groupId) : state[p];
     if (p === "groups")
@@ -578,6 +601,7 @@
       summary = `<div class="stats">${state.equipment.map((e) => stat(esc(e.name), D.available(state, e.id) + "<small> / " + e.stock + "</small>", "貸出可能 / 台帳数")).join("")}</div>`;
     if (p === "reservations")
       summary = `<div class="stats">${state.venues.map((v) => stat(esc(v.name), v.capacity + "<small> 名</small>", "予約 " + D.venueUsage(state, v.id) + " 件")).join("")}</div>`;
+    if (p === "shifts") summary = shiftCoverageSummary();
     if (p === "expenses")
       summary = `<div class="stats">${stat("承認済み経費合計", money(D.expenses(state)), "全団体の承認済み経費")}${stat("総予算", money(state.groups.filter((g) => !g.archivedAt).reduce((n, g) => n + Number(g.budget), 0)), "登録中の団体の予算")}</div>`;
     const exportButton = `<div class="actions"><button class="secondary" id="export-csv">CSV出力</button>${p === "sponsors" ? '<button class="secondary" id="export-public-json">公開用JSON</button><a href="sponsors.html" target="_blank" rel="noopener">公開ページを確認</a>' : ""}</div>`;
@@ -735,6 +759,10 @@
     if (["applications", "reservations", "shifts"].includes(p)) {
       const err = D.validateTime(r);
       if (err) return err;
+      if (p === "shifts") {
+        const breakError = D.validateShiftBreak(r);
+        if (breakError) return breakError;
+      }
       if (p !== "shifts") {
         const v = state.venues.find((v) => v.id === r.venueId);
         if (v && D.capacityExceeded(r.attendees, v.capacity))

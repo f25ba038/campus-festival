@@ -40,12 +40,21 @@
             (r.end >= x.start && r.end <= x.end)),
       );
     },
-    available(s, id) {
+    // 貸出可能数 = 保有数 − 予約・貸出中の数。
+    // date（対象日）を指定すると、返却期限がその日より前の予約は対象日に影響しないものとして除外する。
+    // 貸出中（active）は返却されるまで常に差し引く。excludeId は編集中の貸出自身を除くために使う。
+    available(s, id, date, excludeId) {
       const e = s.equipment.find((e) => e.id === id);
       return e
         ? e.stock -
             s.loans
-              .filter((l) => l.equipmentId === id && l.status === "active")
+              .filter(
+                (l) =>
+                  l.equipmentId === id &&
+                  l.id !== excludeId &&
+                  (l.status === "active" ||
+                    (l.status === "reserved" && (!date || l.due >= date))),
+              )
               .reduce((n, l) => n + Number(l.quantity), 0)
         : 0;
     },

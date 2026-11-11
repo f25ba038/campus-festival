@@ -89,6 +89,9 @@
       ["groupId", "利用団体", "group"],
       ["applicationId", "関連する出店申請", "application"],
       ["quantity", "数量", "number"],
+      ["date", "利用日", "date"],
+      ["start", "開始時刻", "time"],
+      ["end", "終了時刻", "time"],
       ["due", "返却期限", "date"],
       ["status", "状態", "loanStatus"],
     ],
@@ -264,6 +267,8 @@
           ["equipmentId", "備品"],
           ["groupId", "団体"],
           ["quantity", "数量"],
+          ["date", "利用日"],
+          ["_time", "利用時間"],
           ["due", "返却期限"],
           ["status", "状態"],
           ["_late", "期限確認"],
@@ -315,7 +320,10 @@
     if (k === "status") return badge(r[k]);
     if (k === "amount" || k === "budget") return money(r[k]);
     if (k === "_remaining") return money(D.remaining(state, r.id));
-    if (k === "_time") return esc(r.start) + " – " + esc(r.end);
+    if (k === "_time")
+      return r.start && r.end
+        ? esc(r.start) + " – " + esc(r.end)
+        : "日時未設定";
     if (k === "_hours") return D.shiftHours(r) + " h";
     if (k === "_late")
       return D.loanOverdue(r, today())
@@ -335,7 +343,7 @@
       statuses = [...new Set(state[p].map((r) => r.status).filter(Boolean))];
     let summary = "";
     if (p === "loans")
-      summary = `<div class="stats">${state.equipment.map((e) => stat(esc(e.name), D.available(state, e.id) + "<small> / " + e.stock + "</small>", "貸出可能 / 台帳数")).join("")}</div>`;
+      summary = `<div class="stats">${state.equipment.map((e) => stat(esc(e.name), e.stock + "<small> 台</small>", "台帳在庫")).join("")}</div>`;
     if (p === "reservations")
       summary = `<div class="stats">${state.venues.map((v) => stat(esc(v.name), v.capacity + "<small> 名</small>", "予約 " + D.venueUsage(state, v.id) + " 件")).join("")}</div>`;
     if (p === "expenses")
@@ -448,26 +456,28 @@
     $("#editor").showModal();
   }
   function validate(p, r) {
-    if (
-      !D.validateRequired(
-        r,
-        fields[p]
-          .filter((f) =>
-            [
-              "title",
-              "name",
-              "groupId",
-              "venueId",
-              "equipmentId",
-              "date",
-              "due",
-              "start",
-              "end",
-            ].includes(f[0]),
-          )
-          .map((f) => f[0]),
+    const requiredFields = fields[p]
+      .filter((f) =>
+        [
+          "title",
+          "name",
+          "groupId",
+          "venueId",
+          "equipmentId",
+          "date",
+          "due",
+          "start",
+          "end",
+        ].includes(f[0]),
       )
-    )
+      .map((f) => f[0])
+      .filter(
+        (key) =>
+          p !== "loans" ||
+          !["date", "start", "end"].includes(key) ||
+          r.status !== "returned",
+      );
+    if (!D.validateRequired(r, requiredFields))
       return "必須項目を入力してください";
     if (p === "expenses") return D.validateExpense(r);
     if (p === "groups" && D.duplicateGroup(state, r.name, r.id))
@@ -479,8 +489,9 @@
         const v = state.venues.find((v) => v.id === r.venueId);
         if (v && D.capacityExceeded(r.attendees, v.capacity))
           return "会場の定員を超えています";
-        if (p === "reservations" && D.venueConflict(state, r))
-          return "会場の予約時間が重複しています";
+        const conflict = p === "reservations" && D.venueConflict(state, r);
+        if (conflict)
+          return `会場の予約時間が重複しています：${conflict.id}（${conflict.date} ${conflict.start}～${conflict.end}）`;
       }
       if (p === "shifts" && D.shiftConflict(state, r))
         return "スタッフの担当時間が重複しています";
@@ -488,16 +499,26 @@
     if (p === "loans") {
       const err = D.validateQuantity(r.quantity);
       if (err) return err;
-      const previous = state.loans.find((l) => l.id === r.id);
-      const allowance =
-        D.available(state, r.equipmentId) +
-        (previous &&
-        previous.equipmentId === r.equipmentId &&
-        previous.status !== "reserved"
-          ? Number(previous.quantity)
-          : 0);
-      if (r.status !== "returned" && r.quantity > allowance)
-        return "貸出可能数を超えています";
+      if (r.status !== "returned") {
+        const timeError = D.validateTime(r);
+        if (timeError) return timeError;
+        const conflict = D.equipmentConflict(state, r);
+        if (conflict) {
+          const reservationIds = conflict.reservations
+            .map((loan) => {
+              const time =
+                loan.start && loan.end
+                  ? `${loan.date} ${loan.start}～${loan.end}`
+                  : "日時未設定";
+              return `${loan.id}（${time}）`;
+            })
+            .join("、");
+          return `備品の予約数量が在庫を超えます：${name("equipment", r.equipmentId)}、${conflict.start}～${conflict.end}。重複予約：${reservationIds || "なし"}。予約済み${conflict.alreadyReserved}台＋今回${conflict.requested}台／在庫${conflict.stock}台`;
+        }
+      } else if (r.start && r.end) {
+        const timeError = D.validateTime(r);
+        if (timeError) return timeError;
+      }
     }
     return "";
   }
@@ -557,8 +578,11 @@
               toast(err);
               return;
             }
-            if (D.venueConflict(state, a)) {
-              toast("会場予約が重複しています");
+            const conflict = D.venueConflict(state, a);
+            if (conflict) {
+              toast(
+                `会場予約が重複しています：${conflict.id}（${conflict.date} ${conflict.start}～${conflict.end}）`,
+              );
               return;
             }
             D.approve(state, b.dataset.approve);

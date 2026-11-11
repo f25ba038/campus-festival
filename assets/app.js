@@ -402,8 +402,11 @@
       summary = `<div class="toolbar"><label class="filters">対象日 <input id="loan-date" type="date" aria-label="貸出可能数の対象日" value="${esc(loanDate)}"></label></div><div class="stats">${state.equipment.map((e) => stat(esc(e.name), D.available(state, e.id, loanDate) + "<small> / " + e.stock + "</small>", "貸出可能 / 台帳数（" + dateWithWeekday(loanDate) + "時点・予約と貸出中を除く）")).join("")}</div>`;
     if (p === "reservations")
       summary = `<div class="stats">${state.venues.map((v) => stat(esc(v.name), v.capacity + "<small> 名</small>", "予約 " + D.venueUsage(state, v.id) + " 件")).join("")}</div>`;
+    const invalidExpenses = p === "expenses" ? D.invalidExpenses(state) : [];
     if (p === "expenses")
-      summary = `<div class="stats">${stat("承認済み経費合計", money(D.expenses(state)), "全団体の承認済み経費")}${stat("総予算", money(state.groups.filter((g) => !g.archivedAt).reduce((n, g) => n + Number(g.budget), 0)), "登録中の団体の予算")}</div>`;
+      summary = (invalidExpenses.length
+        ? `<div class="help">金額が0円以下（または数値でない）の経費が ${invalidExpenses.length} 件あります。合計・残額が正しく計算されないため、編集して正しい金額に直してください：${invalidExpenses.map((x) => `${esc(x.id)}（${esc(x.title)} / ${esc(x.amount)}円）`).join("、")}</div>`
+        : "") + `<div class="stats">${stat("承認済み経費合計", money(D.expenses(state)), "全団体の承認済み経費")}${stat("総予算", money(state.groups.filter((g) => !g.archivedAt).reduce((n, g) => n + Number(g.budget), 0)), "登録中の団体の予算")}</div>`;
     const exportButton =
       '<button class="secondary" id="export-csv">CSV出力</button>';
     return (

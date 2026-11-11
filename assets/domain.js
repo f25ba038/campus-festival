@@ -67,7 +67,17 @@
     validateExpense(r) {
       if (!Number.isFinite(Number(r.amount)))
         return "金額は数値で入力してください";
+      if (!D.validExpenseAmount(r.amount))
+        return `金額（円）は0円より大きい数値で入力してください（入力値：${r.amount}円）`;
       return "";
+    },
+    validExpenseAmount(value) {
+      const n = Number(value);
+      return Number.isFinite(n) && n > 0;
+    },
+    // 既存データに含まれる0円以下・数値でない金額の経費
+    invalidExpenses(s) {
+      return s.expenses.filter((x) => !D.validExpenseAmount(x.amount));
     },
     validateTime(r) {
       return r.start > r.end ? "終了時刻を開始時刻より後にしてください" : "";

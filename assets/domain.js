@@ -19,7 +19,11 @@
     },
     expenses(s, groupId) {
       return s.expenses
-        .filter((x) => groupId === null || x.groupId === groupId)
+        .filter(
+          (x) =>
+            (groupId === null || x.groupId === groupId) &&
+            (x.status === "submitted" || x.status === "approved"),
+        )
         .reduce((n, x) => n + Number(x.amount), 0);
     },
     remaining(s, groupId) {

@@ -246,8 +246,13 @@
       application.changeHistory[pending.historyIndex].status = "承認済み";
     return "";
   }
-  function badge(v) {
-    return `<span class="badge ${esc(v)}">${esc(labels[v] || v)}</span>`;
+  function statusLabel(status, page) {
+    return page === "expenses" && status === "submitted"
+      ? "申請中"
+      : labels[status] || status;
+  }
+  function badge(v, label = labels[v] || v) {
+    return `<span class="badge ${esc(v)}">${esc(label)}</span>`;
   }
   function toast(msg) {
     $("#toast").textContent = msg;
@@ -293,7 +298,7 @@
         "申請から当日の配置まで、チームの動きをここに。",
       ) +
       `<div class="hero"><div><div class="eyebrow">NOVEMBER 14 — 15, 2026</div><h2>つながるアイデア、広がるキャンパス。</h2><p>学園祭の準備状況を確認して、今日の一歩を進めましょう。</p></div><div class="hero-mark">26 / F</div></div>` +
-      `<div class="stats">${stat("出店申請", state.applications.length + "<small> 件</small>", "承認待ち " + D.pending(state) + " 件")}${stat("参加団体", state.groups.length + "<small> 団体</small>", "所属メンバー " + D.groupMembers(state) + " 名")}${stat("登録経費", money(D.expenses(state, null)), "総予算 " + money(budget))}${stat("タスク完了率", rate + "<small> %</small>", "期限超過 " + D.overdueTasks(state, today()).length + " 件")}</div>` +
+      `<div class="stats">${stat("出店申請", state.applications.length + "<small> 件</small>", "承認待ち " + D.pending(state) + " 件")}${stat("参加団体", state.groups.length + "<small> 団体</small>", "所属メンバー " + D.groupMembers(state) + " 名")}${stat("集計対象経費", money(D.expenses(state, null)), "申請中・承認済み（差し戻し除外）")}${stat("タスク完了率", rate + "<small> %</small>", "期限超過 " + D.overdueTasks(state, today()).length + " 件")}</div>` +
       `<div class="grid2">${panel(
         "承認待ちの出店申請",
         state.applications
@@ -409,7 +414,7 @@
         ];
     }
   }
-  function cell(r, k) {
+  function cell(r, k, page) {
     if (k === "groupId")
       return r[k] === "all" ? "全体" : esc(name("groups", r[k]));
     if (k === "venueId") return esc(name("venues", r[k]));
@@ -417,7 +422,7 @@
     if (k === "status")
       return r.pendingChanges
         ? '<span class="badge submitted">再承認待ち</span>'
-        : badge(r[k]);
+        : badge(r[k], statusLabel(r[k], page));
     if (k === "_changeHistory") return applicationChangeHistory(r);
     if (k === "amount" || k === "budget") return money(r[k]);
     if (k === "_remaining") return money(D.remaining(state, r.id));
@@ -445,7 +450,7 @@
     if (p === "reservations")
       summary = `<div class="stats">${state.venues.map((v) => stat(esc(v.name), v.capacity + "<small> 名</small>", "予約 " + D.venueUsage(state, v.id) + " 件")).join("")}</div>`;
     if (p === "expenses")
-      summary = `<div class="stats">${stat("登録経費合計", money(D.expenses(state, null)), "全団体の経費")}${stat("総予算", money(state.groups.reduce((n, g) => n + Number(g.budget), 0)), "団体ごとの予算を合算")}</div>`;
+      summary = `<div class="stats">${stat("集計対象経費", money(D.expenses(state, null)), "申請中・承認済み（差し戻し除外）")}${stat("総予算", money(state.groups.reduce((n, g) => n + Number(g.budget), 0)), "団体ごとの予算を合算")}</div>`;
     const exportButton =
       '<button class="secondary" id="export-csv">CSV出力</button>';
     return (
@@ -455,7 +460,7 @@
         `<button id="add-row">＋ 新規登録</button>`,
       ) +
       summary +
-      `<div class="toolbar"><div class="filters"><input id="search" type="search" aria-label="一覧を検索" placeholder="キーワードで検索" value="${esc(filterText)}">${statuses.length ? `<select id="status-filter" aria-label="状態で絞り込み"><option value="">すべての状態</option>${statuses.map((s) => `<option value="${s}" ${filterStatus === s ? "selected" : ""}>${labels[s] || s}</option>`).join("")}</select>` : ""}<select id="sort" aria-label="並び順">${cols
+      `<div class="toolbar"><div class="filters"><input id="search" type="search" aria-label="一覧を検索" placeholder="キーワードで検索" value="${esc(filterText)}">${statuses.length ? `<select id="status-filter" aria-label="状態で絞り込み"><option value="">すべての状態</option>${statuses.map((s) => `<option value="${s}" ${filterStatus === s ? "selected" : ""}>${statusLabel(s, p)}</option>`).join("")}</select>` : ""}<select id="sort" aria-label="並び順">${cols
         .filter((c) => !c[0].startsWith("_"))
         .map(
           (c) =>
@@ -464,7 +469,7 @@
         .join(
           "",
         )}</select><span class="subtitle">${rows.length} 件表示</span></div>${exportButton}</div>` +
-      `<div class="panel"><div class="table-scroll"><table><thead><tr>${cols.map((c) => `<th>${c[1]}</th>`).join("")}<th>操作</th></tr></thead><tbody>${rows.length ? rows.map((r) => `<tr>${cols.map((c) => `<td class="${["title", "body", "name"].includes(c[0]) ? "description" : ""}">${cell(r, c[0])}</td>`).join("")}<td><div class="actions"><button class="secondary small" data-edit="${esc(r.id)}">編集</button>${p === "applications" ? `<button class="small" data-approve="${esc(r.id)}">承認</button><button class="danger small" data-cancel="${esc(r.id)}">取消</button>` : ""}${p === "loans" ? `<button class="small" data-return="${esc(r.id)}">返却</button>` : ""}${p === "tasks" ? `<button class="small" data-done="${esc(r.id)}">完了</button>` : ""}<button class="danger small" data-delete="${esc(r.id)}">削除</button></div></td></tr>`).join("") : `<tr><td colspan="${cols.length + 1}" class="empty">該当するデータはありません。</td></tr>`}</tbody></table></div></div>`
+      `<div class="panel"><div class="table-scroll"><table><thead><tr>${cols.map((c) => `<th>${c[1]}</th>`).join("")}<th>操作</th></tr></thead><tbody>${rows.length ? rows.map((r) => `<tr>${cols.map((c) => `<td class="${["title", "body", "name"].includes(c[0]) ? "description" : ""}">${cell(r, c[0], p)}</td>`).join("")}<td><div class="actions"><button class="secondary small" data-edit="${esc(r.id)}">編集</button>${p === "applications" ? `<button class="small" data-approve="${esc(r.id)}">承認</button><button class="danger small" data-cancel="${esc(r.id)}">取消</button>` : ""}${p === "loans" ? `<button class="small" data-return="${esc(r.id)}">返却</button>` : ""}${p === "tasks" ? `<button class="small" data-done="${esc(r.id)}">完了</button>` : ""}<button class="danger small" data-delete="${esc(r.id)}">削除</button></div></td></tr>`).join("") : `<tr><td colspan="${cols.length + 1}" class="empty">該当するデータはありません。</td></tr>`}</tbody></table></div></div>`
     );
   }
   function renderSettings() {
@@ -523,7 +528,10 @@
       taskStatus: ["todo", "active", "done"],
       category: ["備品", "消耗品", "外注", "広報", "その他"],
     };
-    return (map[type] || []).map((s) => [s, labels[s] || s]);
+    return (map[type] || []).map((s) => [
+      s,
+      statusLabel(s, type === "expenseStatus" ? "expenses" : undefined),
+    ]);
   }
   function openEditor(p, id) {
     const original = id ? state[p].find((r) => r.id === id) : null;

@@ -19,12 +19,16 @@
     },
     expenses(s, groupId) {
       return s.expenses
-        .filter((x) => !groupId || x.groupId === groupId)
+        .filter(
+          (x) =>
+            (groupId === null || x.groupId === groupId) &&
+            (x.status === "submitted" || x.status === "approved"),
+        )
         .reduce((n, x) => n + Number(x.amount), 0);
     },
     remaining(s, groupId) {
       const g = s.groups.find((g) => g.id === groupId);
-      return (g?.budget || 50000) - D.expenses(s);
+      return g?.budget == null ? null : g.budget - D.expenses(s, groupId);
     },
     venueConflict(s, r) {
       return (
@@ -121,8 +125,9 @@
     },
     returnLoan(s, id) {
       const l = s.loans.find((x) => x.id === id);
-      if (!l) return;
+      if (!l || l.status !== "active") return false;
       l.status = "returned";
+      return true;
     },
     validateExpense(r) {
       if (!Number.isFinite(Number(r.amount)))
@@ -142,7 +147,12 @@
       );
     },
     overdue(r, today) {
-      return Number(r.due.slice(-2)) < Number(today.slice(-2));
+      return (
+        r.status !== "done" &&
+        typeof r.due === "string" &&
+        /^\d{4}-\d{2}-\d{2}$/.test(r.due) &&
+        r.due < today
+      );
     },
     completion(s) {
       return Math.round(
@@ -165,19 +175,193 @@
       return true;
     },
     nextId(rows, prefix) {
-      return prefix + String(rows.length + 1).padStart(2, "0");
+      const ids = new Set(rows.map((row) => row.id));
+      let suffix = 1;
+      while (ids.has(prefix + String(suffix).padStart(2, "0"))) suffix++;
+      return prefix + String(suffix).padStart(2, "0");
     },
     csv(rows, keys) {
+      const escape = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
       return [
-        keys.join(","),
-        ...rows.map((r) => keys.map((k) => String(r[k] ?? "")).join(",")),
+        keys.map(escape).join(","),
+        ...rows.map((r) => keys.map((k) => escape(r[k])).join(",")),
       ].join("\r\n");
     },
+    publicSponsors(rows) {
+      return rows
+        .filter((row) => row.publicPermission === "approved")
+        .map(({ name, description, website }) => ({
+          name,
+          description,
+          website,
+        }));
+    },
     validateImport(data) {
-      return typeof data === "object" && data !== null;
+      if (
+        !data ||
+        typeof data !== "object" ||
+        Array.isArray(data) ||
+        data.version !== 1 ||
+        !["admin", "leader", "staff"].includes(data.role) ||
+        typeof data.groupId !== "string"
+      )
+        return false;
+
+      const schemas = {
+        groups: {
+          id: "string",
+          name: "string",
+          representative: "string",
+          members: "number",
+          budget: "optionalNumber",
+        },
+        sponsors: {
+          id: "string",
+          name: "string",
+          description: "text",
+          website: "text",
+          publicPermission: ["unset", "denied", "approved"],
+        },
+        venues: { id: "string", name: "string", capacity: "number" },
+        applications: {
+          id: "string",
+          title: "string",
+          groupId: "string",
+          venueId: "string",
+          date: "date",
+          start: "time",
+          end: "time",
+          attendees: "number",
+          status: ["draft", "submitted", "approved", "rejected", "cancelled"],
+          note: "text",
+        },
+        reservations: {
+          id: "string",
+          applicationId: "optionalString",
+          venueId: "string",
+          groupId: "string",
+          date: "date",
+          start: "time",
+          end: "time",
+          attendees: "number",
+          status: ["approved", "cancelled"],
+        },
+        equipment: { id: "string", name: "string", stock: "number" },
+        loans: {
+          id: "string",
+          equipmentId: "string",
+          groupId: "string",
+          applicationId: "optionalString",
+          quantity: "number",
+          due: "date",
+          status: ["reserved", "active", "returned"],
+        },
+        expenses: {
+          id: "string",
+          groupId: "string",
+          title: "string",
+          category: "string",
+          amount: "number",
+          date: "date",
+          status: ["submitted", "approved", "rejected"],
+        },
+        shifts: {
+          id: "string",
+          name: "string",
+          groupId: "string",
+          date: "date",
+          start: "time",
+          end: "time",
+          location: "string",
+        },
+        tasks: {
+          id: "string",
+          title: "string",
+          groupId: "string",
+          owner: "string",
+          due: "date",
+          status: ["todo", "active", "done"],
+          note: "text",
+        },
+        notices: {
+          id: "string",
+          title: "string",
+          body: "string",
+          groupId: "string",
+          date: "date",
+        },
+        activity: { at: "string", message: "string" },
+      };
+      const validDate = (value) => {
+        if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value))
+          return false;
+        const date = new Date(value + "T00:00:00Z");
+        return (
+          !Number.isNaN(date.getTime()) &&
+          date.toISOString().slice(0, 10) === value
+        );
+      };
+      const validTime = (value) =>
+        typeof value === "string" &&
+        /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value);
+
+      for (const [collection, schema] of Object.entries(schemas)) {
+        if (collection === "sponsors" && data.sponsors === undefined)
+          continue;
+        if (
+          !Array.isArray(data[collection]) ||
+          !data[collection].every((row) => {
+            if (!row || typeof row !== "object" || Array.isArray(row))
+              return false;
+            return Object.entries(schema).every(([key, type]) => {
+              const value = row[key];
+              if (Array.isArray(type)) return type.includes(value);
+              if (type === "number") return Number.isFinite(value);
+              if (type === "optionalNumber")
+                return value === null || Number.isFinite(value);
+              if (type === "text") return typeof value === "string";
+              if (type === "optionalString")
+                return typeof value === "string";
+              if (type === "date") return validDate(value);
+              if (type === "time") return validTime(value);
+              return typeof value === "string" && value.length > 0;
+            });
+          })
+        )
+          return false;
+      }
+
+      if (
+        (data.groupId !== "" &&
+          !data.groups.some((group) => group.id === data.groupId)) ||
+        data.groups.some(
+          (group) =>
+            group.archivedAt !== undefined &&
+            typeof group.archivedAt !== "string",
+        )
+      )
+        return false;
+
+      return D.validateUniqueIds(data);
     },
     validateUniqueIds(data) {
-      return true;
+      const collections = [
+        "groups",
+        ...(Array.isArray(data.sponsors) ? ["sponsors"] : []),
+        "venues",
+        "applications",
+        "reservations",
+        "equipment",
+        "loans",
+        "expenses",
+        "shifts",
+        "tasks",
+        "notices",
+      ];
+      const ids = collections.flatMap((collection) =>
+        data[collection].map((row) => row.id),
+      );
+      return new Set(ids).size === ids.length;
     },
     editCopy(row) {
       return row;

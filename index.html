@@ -60,6 +60,29 @@
         </div>
       </form>
     </dialog>
+    <dialog id="delete-confirm" aria-labelledby="delete-title">
+      <div class="dialog-head">
+        <h2 id="delete-title">削除の確認</h2>
+        <button
+          type="button"
+          id="cancel-delete-close"
+          class="icon-button"
+          aria-label="閉じる"
+        >
+          ×
+        </button>
+      </div>
+      <p id="delete-message"></p>
+      <dl id="delete-details" class="delete-details"></dl>
+      <div class="dialog-actions">
+        <button type="button" id="cancel-delete" class="secondary">
+          キャンセル
+        </button>
+        <button type="button" id="confirm-delete" class="danger">
+          削除する
+        </button>
+      </div>
+    </dialog>
     <script src="assets/seed.js"></script>
     <script src="assets/domain.js"></script>
     <script src="assets/app.js"></script>

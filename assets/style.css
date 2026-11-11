@@ -466,6 +466,23 @@ dialog::backdrop {
   gap: 10px;
   margin-top: 24px;
 }
+.delete-details {
+  display: grid;
+  grid-template-columns: minmax(90px, 0.35fr) minmax(0, 1fr);
+  gap: 10px 16px;
+  margin: 20px 0;
+  padding: 16px;
+  border-radius: 8px;
+  background: #f5f7f2;
+}
+.delete-details dt {
+  color: var(--muted);
+  font-size: 12px;
+}
+.delete-details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
 #toast {
   position: fixed;
   bottom: 24px;
@@ -528,6 +545,33 @@ dialog::backdrop {
 .report-card summary {
   cursor: pointer;
   color: var(--green);
+}
+.public-sponsors-page {
+  min-height: 100vh;
+}
+.public-sponsors-page main {
+  margin: 0 auto;
+  max-width: 900px;
+  padding: 48px 24px;
+}
+.public-sponsors-page header {
+  height: auto;
+  display: block;
+  border: 0;
+  letter-spacing: 0;
+}
+.sponsor-card {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 22px;
+  margin: 14px 0;
+}
+.sponsor-card h2 {
+  margin-bottom: 10px;
+}
+.sponsor-card p {
+  white-space: pre-wrap;
 }
 @media (max-width: 1100px) {
   main {

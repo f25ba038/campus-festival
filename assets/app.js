@@ -19,6 +19,7 @@
     storageWarning = "",
     filterText = "",
     filterStatus = "",
+    overdueOnly = false,
     sortKey = "id",
     editing = null,
     toastTimer;
@@ -311,7 +312,7 @@
         "申請から当日の配置まで、チームの動きをここに。",
       ) +
       `<div class="hero"><div><div class="eyebrow">NOVEMBER 14 — 15, 2026</div><h2>つながるアイデア、広がるキャンパス。</h2><p>学園祭の準備状況を確認して、今日の一歩を進めましょう。</p></div><div class="hero-mark">26 / F</div></div>` +
-      `<div class="stats">${stat("出店申請", state.applications.length + "<small> 件</small>", "承認待ち " + D.pending(state) + " 件")}${stat("参加団体", state.groups.length + "<small> 団体</small>", "所属メンバー " + D.groupMembers(state) + " 名")}${stat("集計対象経費", money(D.expenses(state, null)), "申請中・承認済み（差し戻し除外）")}${stat("タスク完了率", rate + "<small> %</small>", "期限超過 " + D.overdueTasks(state, today()).length + " 件")}</div>` +
+      `<div class="stats">${stat("出店申請", state.applications.length + "<small> 件</small>", "承認待ち " + D.pending(state) + " 件")}${stat("参加団体", state.groups.length + "<small> 団体</small>", "所属メンバー " + D.groupMembers(state) + " 名")}${stat("集計対象経費", money(D.expenses(state, null)), "申請中・承認済み（差し戻し除外）")}${stat("タスク完了率", rate + "<small> %</small>", "未完了の期限超過 " + D.overdueTasks(state, today()).length + " 件")}</div>` +
       `<div class="grid2">${panel(
         "承認待ちの出店申請",
         state.applications
@@ -416,6 +417,7 @@
           ["owner", "担当者"],
           ["due", "期限"],
           ["status", "状態"],
+          ["_overdue", "期限確認"],
         ];
       case "notices":
         return [
@@ -446,12 +448,18 @@
       return D.loanOverdue(r, today())
         ? '<span class="badge rejected">期限超過</span>'
         : "—";
+    if (k === "_overdue")
+      return D.overdue(r, today())
+        ? '<span class="badge rejected">期限超過</span>'
+        : "—";
     return esc(r[k]);
   }
   function renderList(p) {
     let rows = p === "notices" ? D.notices(state, state.groupId) : state[p];
     rows = D.search(rows, filterText);
     if (filterStatus) rows = rows.filter((r) => r.status === filterStatus);
+    if (p === "tasks" && overdueOnly)
+      rows = rows.filter((task) => D.overdue(task, today()));
     rows =
       p === "tasks" && sortKey === "id"
         ? D.taskOrder(rows)
@@ -465,6 +473,8 @@
       summary = `<div class="stats">${state.venues.map((v) => stat(esc(v.name), v.capacity + "<small> 名</small>", "予約 " + D.venueUsage(state, v.id) + " 件")).join("")}</div>`;
     if (p === "expenses")
       summary = `<div class="stats">${stat("集計対象経費", money(D.expenses(state, null)), "申請中・承認済み（差し戻し除外）")}${stat("総予算", money(state.groups.reduce((n, g) => n + Number(g.budget), 0)), "団体ごとの予算を合算")}</div>`;
+    if (p === "tasks")
+      summary = `<div class="stats">${stat("未完了の期限超過", D.overdueTasks(state, today()).length + "<small> 件</small>", "完了済みは除外")}</div>`;
     const exportButton =
       '<button class="secondary" id="export-csv">CSV出力</button>';
     return (
@@ -474,7 +484,7 @@
         `<button id="add-row">＋ 新規登録</button>`,
       ) +
       summary +
-      `<div class="toolbar"><div class="filters"><input id="search" type="search" aria-label="一覧を検索" placeholder="キーワードで検索" value="${esc(filterText)}">${statuses.length ? `<select id="status-filter" aria-label="状態で絞り込み"><option value="">すべての状態</option>${statuses.map((s) => `<option value="${s}" ${filterStatus === s ? "selected" : ""}>${statusLabel(s, p)}</option>`).join("")}</select>` : ""}<select id="sort" aria-label="並び順">${cols
+      `<div class="toolbar"><div class="filters"><input id="search" type="search" aria-label="一覧を検索" placeholder="キーワードで検索" value="${esc(filterText)}">${statuses.length ? `<select id="status-filter" aria-label="状態で絞り込み"><option value="">すべての状態</option>${statuses.map((s) => `<option value="${s}" ${filterStatus === s ? "selected" : ""}>${statusLabel(s, p)}</option>`).join("")}</select>` : ""}${p === "tasks" ? `<select id="overdue-filter" aria-label="期限超過で絞り込み"><option value="all" ${!overdueOnly ? "selected" : ""}>すべての期限</option><option value="overdue" ${overdueOnly ? "selected" : ""}>期限超過のみ</option></select>` : ""}<select id="sort" aria-label="並び順">${cols
         .filter((c) => !c[0].startsWith("_"))
         .map(
           (c) =>
@@ -653,6 +663,11 @@
       if ($("#status-filter"))
         $("#status-filter").onchange = (e) => {
           filterStatus = e.target.value;
+          render();
+        };
+      if ($("#overdue-filter"))
+        $("#overdue-filter").onchange = (e) => {
+          overdueOnly = e.target.value === "overdue";
           render();
         };
       $("#sort").onchange = (e) => {
@@ -904,6 +919,7 @@
   window.addEventListener("hashchange", () => {
     filterText = "";
     filterStatus = "";
+    overdueOnly = false;
     sortKey = "id";
     render();
   });

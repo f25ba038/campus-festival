@@ -33,6 +33,9 @@
     storageWarning =
       "保存済みデータを読み込めなかったため、初期データを表示しています。必要ならバックアップから復元してください。";
   }
+  if (!Array.isArray(state.sponsors))
+    state.sponsors = structuredClone(FestivalSeed.sponsors);
+  let lastSavedState = JSON.stringify(state);
   const labels = {
     draft: "下書き",
     submitted: "承認待ち",
@@ -45,9 +48,15 @@
     todo: "未着手",
     done: "完了",
   };
+  const permissionLabels = {
+    unset: "未設定",
+    denied: "未許可",
+    approved: "許可済み",
+  };
   const pages = {
     dashboard: ["◈", "ダッシュボード", "OVERVIEW"],
     groups: ["◎", "団体・メンバー", "ORGANIZATIONS"],
+    sponsors: ["◇", "協賛先", "SPONSORS"],
     applications: ["▤", "出店申請", "APPLICATIONS"],
     reservations: ["▦", "会場予約", "VENUES"],
     loans: ["▣", "備品・貸出", "EQUIPMENT"],
@@ -63,6 +72,12 @@
       ["representative", "代表者", "text"],
       ["members", "所属人数", "number"],
       ["budget", "予算（円）", "number"],
+    ],
+    sponsors: [
+      ["name", "協賛先名", "text"],
+      ["description", "紹介文", "textarea"],
+      ["website", "Webサイト", "text"],
+      ["publicPermission", "情報の公開許可", "publicPermission"],
     ],
     applications: [
       ["title", "企画名", "text"],
@@ -126,6 +141,7 @@
   };
   const prefixes = {
     groups: "G",
+    sponsors: "SP",
     applications: "A",
     reservations: "R",
     loans: "L",
@@ -280,7 +296,7 @@
     try {
       localStorage.setItem(KEY, JSON.stringify(state));
     } catch (e) {
-      toast("保存できませんでした。データ管理からバックアップしてください。");
+      toast("保存できませんでした。データ管理からバックアップしてください。");@
       return;
     }
     if (message) toast(message);
@@ -356,6 +372,14 @@
           ["members", "人数"],
           ["budget", "予算"],
           ["_remaining", "残額"],
+        ];
+      case "sponsors":
+        return [
+          ["id", "ID"],
+          ["name", "協賛先名"],
+          ["description", "紹介文"],
+          ["website", "Webサイト"],
+          ["publicPermission", "情報の公開許可"],
         ];
       case "applications":
         return [
@@ -434,11 +458,9 @@
       return r[k] === "all" ? "全体" : esc(name("groups", r[k]));
     if (k === "venueId") return esc(name("venues", r[k]));
     if (k === "equipmentId") return esc(name("equipment", r[k]));
-    if (k === "status")
-      return r.pendingChanges
-        ? '<span class="badge submitted">再承認待ち</span>'
-        : badge(r[k], statusLabel(r[k], page));
-    if (k === "_changeHistory") return applicationChangeHistory(r);
+    if (k === "status") return badge(r[k]);
+    if (k === "publicPermission")
+      return `<span class="badge ${r[k] === "denied" ? "rejected" : r[k] === "approved" ? "approved" : ""}">${esc(permissionLabels[r[k]] || "未設定")}</span>`;
     if (k === "amount" || k === "budget") return money(r[k]);
     if (k === "date" || k === "due") return dateWithWeekday(r[k]);
     if (k === "_remaining") return money(D.remaining(state, r.id));
@@ -457,26 +479,34 @@
   function renderList(p) {
     let rows = p === "notices" ? D.notices(state, state.groupId) : state[p];
     rows = D.search(rows, filterText);
-    if (filterStatus) rows = rows.filter((r) => r.status === filterStatus);
-    if (p === "tasks" && overdueOnly)
-      rows = rows.filter((task) => D.overdue(task, today()));
+    if (filterStatus)
+      rows = rows.filter((r) =>
+        p === "sponsors"
+          ? r.publicPermission === filterStatus
+          : r.status === filterStatus,
+      );
     rows =
       p === "tasks" && sortKey === "id"
         ? D.taskOrder(rows)
         : D.sort(rows, sortKey);
     const cols = columns(p),
-      statuses = [...new Set(state[p].map((r) => r.status).filter(Boolean))];
+      statuses = [
+        ...new Set(
+          state[p]
+            .map((r) =>
+              p === "sponsors" ? r.publicPermission : r.status,
+            )
+            .filter(Boolean),
+        ),
+      ];
     let summary = "";
     if (p === "loans")
       summary = `<div class="stats">${state.equipment.map((e) => stat(esc(e.name), D.available(state, e.id) + "<small> / " + e.stock + "</small>", "貸出可能 / 台帳数")).join("")}</div>`;
     if (p === "reservations")
       summary = `<div class="stats">${state.venues.map((v) => stat(esc(v.name), v.capacity + "<small> 名</small>", "予約 " + D.venueUsage(state, v.id) + " 件")).join("")}</div>`;
     if (p === "expenses")
-      summary = `<div class="stats">${stat("集計対象経費", money(D.expenses(state, null)), "申請中・承認済み（差し戻し除外）")}${stat("総予算", money(state.groups.reduce((n, g) => n + Number(g.budget), 0)), "団体ごとの予算を合算")}</div>`;
-    if (p === "tasks")
-      summary = `<div class="stats">${stat("未完了の期限超過", D.overdueTasks(state, today()).length + "<small> 件</small>", "完了済みは除外")}</div>`;
-    const exportButton =
-      '<button class="secondary" id="export-csv">CSV出力</button>';
+      summary = `<div class="stats">${stat("承認済み経費合計", money(D.expenses(state)), "全団体の承認済み経費")}${stat("総予算", money(state.groups.filter((g) => !g.archivedAt).reduce((n, g) => n + Number(g.budget), 0)), "登録中の団体の予算")}</div>`;
+    const exportButton = `<div class="actions"><button class="secondary" id="export-csv">CSV出力</button>${p === "sponsors" ? '<button class="secondary" id="export-public-json">公開用JSON</button><a href="sponsors.html" target="_blank" rel="noopener">公開ページを確認</a>' : ""}</div>`;
     return (
       head(
         pages[p][1],
@@ -484,7 +514,7 @@
         `<button id="add-row">＋ 新規登録</button>`,
       ) +
       summary +
-      `<div class="toolbar"><div class="filters"><input id="search" type="search" aria-label="一覧を検索" placeholder="キーワードで検索" value="${esc(filterText)}">${statuses.length ? `<select id="status-filter" aria-label="状態で絞り込み"><option value="">すべての状態</option>${statuses.map((s) => `<option value="${s}" ${filterStatus === s ? "selected" : ""}>${statusLabel(s, p)}</option>`).join("")}</select>` : ""}${p === "tasks" ? `<select id="overdue-filter" aria-label="期限超過で絞り込み"><option value="all" ${!overdueOnly ? "selected" : ""}>すべての期限</option><option value="overdue" ${overdueOnly ? "selected" : ""}>期限超過のみ</option></select>` : ""}<select id="sort" aria-label="並び順">${cols
+      `<div class="toolbar"><div class="filters"><input id="search" type="search" aria-label="一覧を検索" placeholder="キーワードで検索" value="${esc(filterText)}">${p === "groups" ? `<select id="group-filter" aria-label="団体の表示"><option value="active" ${groupFilter === "active" ? "selected" : ""}>登録中</option><option value="archived" ${groupFilter === "archived" ? "selected" : ""}>削除済みの履歴</option><option value="all" ${groupFilter === "all" ? "selected" : ""}>すべて</option></select>` : ""}${statuses.length ? `<select id="status-filter" aria-label="状態で絞り込み"><option value="">すべての状態</option>${statuses      .map((s) => `<option value="${s}" ${filterStatus === s ? "selected" : ""}>${p === "sponsors" ? permissionLabels[s] : labels[s] || s}</option>`).join("")}</select>` : ""}<select id="sort" aria-label="並び順">${cols
         .filter((c) => !c[0].startsWith("_"))
         .map(
           (c) =>
@@ -551,6 +581,7 @@
       expenseStatus: ["submitted", "approved", "rejected"],
       taskStatus: ["todo", "active", "done"],
       category: ["備品", "消耗品", "外注", "広報", "その他"],
+      publicPermission: ["unset", "denied", "approved"],
     };
     return (map[type] || []).map((s) => [
       s,
@@ -566,6 +597,7 @@
           ? D.editCopy(original)
           : {};
     if (p === "expenses" && original) row = D.expenseForEdit(original);
+    if (p === "sponsors" && !original) row.publicPermission = "unset";
     editing = { p, id, row, original };
     $("#dialog-title").textContent =
       pages[p][1] + " / " + (id ? "編集" : "新規登録");
@@ -674,15 +706,25 @@
         sortKey = e.target.value;
         render();
       };
-      $("#export-csv").onclick = () =>
+      $("#export-csv").onclick = () => {
+        const isPublicSponsorExport = p === "sponsors";
         download(
-          p + ".csv",
+          isPublicSponsorExport ? "public-sponsors.csv" : p + ".csv",
           D.csv(
-            state[p],
-            fields[p].map((f) => f[0]),
+            isPublicSponsorExport ? D.publicSponsors(state.sponsors) : state[p],
+            isPublicSponsorExport
+              ? ["name", "description", "website"]
+              : fields[p].map((f) => f[0]),
           ),
           "text/csv",
         );
+      };
+      if (p === "sponsors")
+        $("#export-public-json").onclick = () =>
+          download(
+            "public-sponsors.json",
+            JSON.stringify(D.publicSponsors(state.sponsors), null, 2),
+          );
       document
         .querySelectorAll("[data-edit]")
         .forEach((b) => (b.onclick = () => openEditor(p, b.dataset.edit)));
@@ -780,6 +822,8 @@
             throw Error("形式が不正です");
           if (!confirm("現在のデータを置き換えますか？")) return;
           const restored = structuredClone(data);
+          if (!Array.isArray(restored.sponsors))
+            restored.sponsors = structuredClone(FestivalSeed.sponsors);
           restored.activity.unshift({
             at: new Date().toISOString(),
             message: "バックアップを復元しました",

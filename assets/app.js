@@ -359,6 +359,9 @@
         badge(r[k]) +
         (r.reapprovalPending && r.status !== "approved"
           ? ' <span class="badge submitted">再承認待ち</span>'
+          : "") +
+        (r.status === "rejected" && r.rejectReason
+          ? `<div class="subtitle">理由：${esc(r.rejectReason)}</div>`
           : "")
       );
     if (k === "amount" || k === "budget") return money(r[k]);
@@ -419,7 +422,7 @@
         .join(
           "",
         )}</select><span class="subtitle">${rows.length} 件表示</span></div>${exportButton}</div>` +
-      `<div class="panel"><div class="table-scroll"><table><thead><tr>${cols.map((c) => `<th>${c[1]}</th>`).join("")}<th>操作</th></tr></thead><tbody>${rows.length ? rows.map((r) => `<tr>${cols.map((c) => `<td class="${["title", "body", "name"].includes(c[0]) ? "description" : ""}">${cell(r, c[0])}</td>`).join("")}<td><div class="actions"><button class="secondary small" data-edit="${esc(r.id)}">編集</button>${p === "applications" ? `<button class="small" data-approve="${esc(r.id)}">承認</button><button class="danger small" data-cancel="${esc(r.id)}">取消</button>` : ""}${p === "loans" && r.status === "active" ? `<button class="small" data-return="${esc(r.id)}">返却</button>` : ""}${p === "tasks" ? `<button class="small" data-done="${esc(r.id)}">完了</button>` : ""}${p === "groups" ? (r.archivedAt ? `<button class="small" data-restore-group="${esc(r.id)}">復元</button>` : `<button class="danger small" data-delete="${esc(r.id)}">履歴へ</button>`) : `<button class="danger small" data-delete="${esc(r.id)}">削除</button>`}</div></td></tr>`).join("") : `<tr><td colspan="${cols.length + 1}" class="empty">該当するデータはありません。</td></tr>`}</tbody></table></div></div>`
+      `<div class="panel"><div class="table-scroll"><table><thead><tr>${cols.map((c) => `<th>${c[1]}</th>`).join("")}<th>操作</th></tr></thead><tbody>${rows.length ? rows.map((r) => `<tr>${cols.map((c) => `<td class="${["title", "body", "name"].includes(c[0]) ? "description" : ""}">${cell(r, c[0])}</td>`).join("")}<td><div class="actions"><button class="secondary small" data-edit="${esc(r.id)}">編集</button>${p === "applications" ? `<button class="small" data-approve="${esc(r.id)}">承認</button><button class="secondary small" data-reject="${esc(r.id)}">差し戻し</button><button class="danger small" data-cancel="${esc(r.id)}">取消</button>` : ""}${p === "loans" && r.status === "active" ? `<button class="small" data-return="${esc(r.id)}">返却</button>` : ""}${p === "tasks" ? `<button class="small" data-done="${esc(r.id)}">完了</button>` : ""}${p === "groups" ? (r.archivedAt ? `<button class="small" data-restore-group="${esc(r.id)}">復元</button>` : `<button class="danger small" data-delete="${esc(r.id)}">履歴へ</button>`) : `<button class="danger small" data-delete="${esc(r.id)}">削除</button>`}</div></td></tr>`).join("") : `<tr><td colspan="${cols.length + 1}" class="empty">該当するデータはありません。</td></tr>`}</tbody></table></div></div>`
     );
   }
   function renderSettings() {
@@ -524,7 +527,9 @@
         ? '<div class="help">承認済みです。会場・開催日・時刻・団体・人数を変更すると、再承認が完了するまで承認待ちとなり、関連する会場予約は取り消されます。</div>'
         : a?.reapprovalPending
           ? '<div class="help">重要項目が変更されたため再承認待ちです。実行委員が一覧の「承認」ボタンで再承認すると、会場予約に変更内容が反映されます。</div>'
-          : "";
+          : a?.status === "rejected" && a.rejectReason
+            ? `<div class="help"><b>差し戻し理由</b><br>${esc(a.rejectReason)}</div>`
+            : "";
     const history = a?.changeHistory || [];
     if (!history.length) return notice;
     const roles = { admin: "実行委員", leader: "団体代表", staff: "一般スタッフ" };
@@ -532,6 +537,7 @@
       reapprovalRequired: "重要項目の変更（再承認が必要）",
       edited: "変更",
       reapproved: "再承認",
+      rejected: "差し戻し",
     };
     const label = (k) =>
       fields.applications.find((f) => f[0] === k)?.[1] || k;
@@ -549,7 +555,7 @@
         .reverse()
         .map(
           (h) =>
-            `<div class="notice-row"><small>${esc(new Date(h.at).toLocaleString("ja-JP"))} / ${esc(roles[h.role] || h.role)}</small><b>${esc(types[h.type] || h.type)}</b>${(h.changes || []).map((c) => `<div>${esc(label(c.field))}：${value(c.field, c.before)} → ${value(c.field, c.after)}</div>`).join("")}</div>`,
+            `<div class="notice-row"><small>${esc(new Date(h.at).toLocaleString("ja-JP"))} / ${esc(roles[h.role] || h.role)}</small><b>${esc(types[h.type] || h.type)}</b>${h.reason ? `<div>理由：${esc(h.reason)}</div>` : ""}${(h.changes || []).map((c) => `<div>${esc(label(c.field))}：${value(c.field, c.before)} → ${value(c.field, c.after)}</div>`).join("")}</div>`,
         )
         .join("")}</div></div>`
     );
@@ -571,6 +577,12 @@
       original?.status !== "approved"
     )
       return "承認（再承認）は一覧の「承認」ボタンから行ってください";
+    if (
+      p === "applications" &&
+      r.status === "rejected" &&
+      original?.status !== "rejected"
+    )
+      return "差し戻しは一覧の「差し戻し」ボタンから理由を入力して行ってください";
     if (
       !D.validateRequired(
         r,
@@ -724,6 +736,33 @@
               return;
             }
             save("出店を承認し、会場を予約しました");
+            render();
+          }),
+      );
+      document.querySelectorAll("[data-reject]").forEach(
+        (b) =>
+          (b.onclick = () => {
+            if (!D.canApprove(state.role)) {
+              toast("実行委員の操作です");
+              return;
+            }
+            const a = state.applications.find(
+              (x) => x.id === b.dataset.reject,
+            );
+            if (a?.status !== "submitted") {
+              toast("承認待ちの申請のみ差し戻しできます");
+              return;
+            }
+            const reason = prompt(
+              "差し戻し理由を入力してください（団体に表示されます）",
+            );
+            if (reason === null) return;
+            const err = D.reject(state, b.dataset.reject, reason);
+            if (err) {
+              toast(err);
+              return;
+            }
+            save("出店申請を差し戻しました");
             render();
           }),
       );

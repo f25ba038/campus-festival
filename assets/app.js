@@ -769,6 +769,11 @@
       $("#form-status").textContent = saveError;
       return;
     }
+    if (p === "groups" && !id) {
+      groupFilter = "active";
+      filterText = "";
+      filterStatus = "";
+    }
     $("#editor").close();
     render();
   };

@@ -15,7 +15,6 @@
       </p>
       <p><label>配布されたMarkdownを取り込む <input id="import" type="file" accept=".md,text/markdown" multiple /></label></p>
       <p id="import-result" role="status"></p>
-      <p id="save-status" role="status" aria-live="polite"></p>
       <div class="help">
         開発運用担当は、報告を確認して影響・再現条件・期待する動作を調べ、取り組むものをGitHub
         Issueへ整理してください。元報告のIDを必ず残します。必要な情報は利用者役の教員に質問できます。
@@ -55,7 +54,6 @@
           );
       let notes = {};
       let reports = [];
-      let hasUnsavedNotes = false;
       try {
         notes = JSON.parse(localStorage.getItem("festival-inbox-v1") || "{}");
       } catch {}
@@ -66,19 +64,8 @@
       function save() {
         try {
           localStorage.setItem("festival-inbox-v1", JSON.stringify(notes));
-          hasUnsavedNotes = false;
-          $("#save-status").textContent = "整理メモを保存しました。";
-          return true;
-        } catch (error) {
-          const quotaExceeded =
-            error.name === "QuotaExceededError" ||
-            error.name === "NS_ERROR_DOM_QUOTA_REACHED" ||
-            error.code === 22 ||
-            error.code === 1014;
-          $("#save-status").textContent = quotaExceeded
-            ? "保存容量の上限に達しました。入力内容はこの画面に保持しています。「整理メモを書き出す」で保管してください。"
-            : "整理メモを保存できませんでした。入力内容はこの画面に保持しています。「整理メモを書き出す」で保管してください。";
-          return false;
+        } catch {
+          alert("整理メモを保存できません。書き出して保管してください。");
         }
       }
       function render() {
@@ -103,7 +90,6 @@
         document.querySelectorAll("[data-status]").forEach(
           (x) =>
             (x.onchange = () => {
-              hasUnsavedNotes = true;
               notes[x.dataset.status] = {
                 ...notes[x.dataset.status],
                 status: x.value,
@@ -114,7 +100,6 @@
         document.querySelectorAll("[data-memo]").forEach(
           (x) =>
             (x.oninput = () => {
-              hasUnsavedNotes = true;
               notes[x.dataset.memo] = {
                 ...notes[x.dataset.memo],
                 memo: x.value,
@@ -140,11 +125,6 @@
       }
       $("#query").oninput = render;
       $("#filter").onchange = render;
-      window.addEventListener("beforeunload", (event) => {
-        if (!hasUnsavedNotes) return;
-        event.preventDefault();
-        event.returnValue = "";
-      });
       $("#import").onchange = async (event) => {
         const input = event.currentTarget;
         input.disabled = true;
@@ -167,24 +147,17 @@
           localStorage.setItem("festival-reports-v1", JSON.stringify(next));
           const added = next.length - reports.length;
           reports = next;
-          $("#import-result").textContent = `${added}件を保存しました。累計${reports.length}件です。`;
+          $("#import-result").textContent = `${added}件追加しました。累計${reports.length}件です。`;
           render();
         } catch (error) {
-          const quotaExceeded =
-            error.name === "QuotaExceededError" ||
-            error.name === "NS_ERROR_DOM_QUOTA_REACHED" ||
-            error.code === 22 ||
-            error.code === 1014;
-          $("#import-result").textContent = quotaExceeded
-            ? "保存容量の上限に達したため報告を保存できませんでした。不要なデータを整理してから、ファイルを再度取り込んでください。"
-            : `取り込めませんでした。 ${error.message}`;
+          $("#import-result").textContent = `取り込めませんでした。 ${error.message}`;
         } finally {
           input.value = "";
           input.disabled = false;
         }
       };
       $("#export").onclick = () => {
-        const saved = save();
+        save();
         const a = document.createElement("a"),
           url = URL.createObjectURL(
             new Blob([JSON.stringify(notes, null, 2)], {
@@ -195,9 +168,6 @@
         a.download = "inbox-notes.json";
         a.click();
         setTimeout(() => URL.revokeObjectURL(url), 1000);
-        $("#save-status").textContent = saved
-          ? "整理メモをJSONに書き出しました。"
-          : "保存に失敗した入力内容をJSONに書き出しました。";
       };
       render();
     </script>

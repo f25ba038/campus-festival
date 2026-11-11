@@ -73,7 +73,7 @@
       ["name", "団体名", "text"],
       ["representative", "代表者", "text"],
       ["members", "所属人数", "number"],
-      ["budget", "予算（円）", "number"],
+      ["budget", "予算（円）", "budget"],
     ],
     sponsors: [
       ["name", "協賛先名", "text"],
@@ -164,6 +164,16 @@
       Number(n).toLocaleString("ja-JP", { maximumFractionDigits: 20 })
     );
   }
+  function budgetSummary(groups) {
+    const configured = groups.filter((g) => g.budget != null);
+    if (!configured.length) return "未設定";
+    const total = configured.reduce((n, g) => n + Number(g.budget), 0);
+    const unsetCount = groups.length - configured.length;
+    return (
+      money(total) +
+      (unsetCount ? `（設定済み ${configured.length}/${groups.length} 団体）` : "")
+    );
+  }
   function dateWithWeekday(value) {
     const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
     if (!match) return esc(value);
@@ -239,15 +249,14 @@
   }
   function renderDashboard() {
     const activeGroups = state.groups.filter((g) => !g.archivedAt);
-    const rate = D.completion(state),
-      budget = activeGroups.reduce((n, g) => n + Number(g.budget), 0);
+    const rate = D.completion(state);
     return (
       head(
         "運営の今を、ひと目で。",
         "申請から当日の配置まで、チームの動きをここに。",
       ) +
       `<div class="hero"><div><div class="eyebrow">NOVEMBER 14 — 15, 2026</div><h2>つながるアイデア、広がるキャンパス。</h2><p>学園祭の準備状況を確認して、今日の一歩を進めましょう。</p></div><div class="hero-mark">26 / F</div></div>` +
-      `<div class="stats">${stat("出店申請", state.applications.length + "<small> 件</small>", "承認待ち " + D.pending(state) + " 件")}${stat("参加団体", activeGroups.length + "<small> 団体</small>", "所属メンバー " + D.groupMembers(state) + " 名")}${stat("承認済み経費", money(D.expenses(state)), "総予算 " + money(budget))}${stat("タスク完了率", rate + "<small> %</small>", "期限超過 " + D.overdueTasks(state, today()).length + " 件")}</div>` +
+      `<div class="stats">${stat("出店申請", state.applications.length + "<small> 件</small>", "承認待ち " + D.pending(state) + " 件")}${stat("参加団体", activeGroups.length + "<small> 団体</small>", "所属メンバー " + D.groupMembers(state) + " 名")}${stat("承認済み経費", money(D.expenses(state)), "総予算 " + budgetSummary(activeGroups))}${stat("タスク完了率", rate + "<small> %</small>", "期限超過 " + D.overdueTasks(state, today()).length + " 件")}</div>` +
       `<div class="grid2">${panel(
         "承認待ちの出店申請",
         state.applications
@@ -269,7 +278,19 @@
           .join(""),
         '<a href="#notices">すべて見る →</a>',
       )}</div>` +
-      `<div class="grid2">${panel("団体別の予算残額", activeGroups.map((g) => `<div class="metric-line"><span>${esc(g.name)}</span><b>${money(D.remaining(state, g.id))}</b></div><div class="progress"><span style="width:${Math.max(0, Math.min(100, ((g.budget - D.expenses(state, g.id)) / Math.max(1, g.budget)) * 100))}%"></span></div>`).join(""))}${panel(
+      `<div class="grid2">${panel(
+        "団体別の予算残額",
+        activeGroups
+          .map((g) => {
+            const remaining = D.remaining(state, g.id);
+            const progress =
+              remaining === null
+                ? ""
+                : `<div class="progress"><span style="width:${Math.max(0, Math.min(100, ((g.budget - D.expenses(state, g.id)) / Math.max(1, g.budget)) * 100))}%"></span></div>`;
+            return `<div class="metric-line"><span>${esc(g.name)}</span><b>${remaining === null ? "未設定" : money(remaining)}</b></div>${progress}`;
+          })
+          .join(""),
+      )}${panel(
         "最近の操作",
         state.activity
           .slice(0, 6)
@@ -379,9 +400,13 @@
     if (k === "status") return badge(r[k]);
     if (k === "publicPermission")
       return `<span class="badge ${r[k] === "denied" ? "rejected" : r[k] === "approved" ? "approved" : ""}">${esc(permissionLabels[r[k]] || "未設定")}</span>`;
-    if (k === "amount" || k === "budget") return money(r[k]);
+    if (k === "budget") return r[k] == null ? "未設定" : money(r[k]);
+    if (k === "amount") return money(r[k]);
     if (k === "date" || k === "due") return dateWithWeekday(r[k]);
-    if (k === "_remaining") return money(D.remaining(state, r.id));
+    if (k === "_remaining") {
+      const remaining = D.remaining(state, r.id);
+      return remaining === null ? "未設定" : money(remaining);
+    }
     if (k === "_archive")
       return r.archivedAt
         ? "削除済み " + esc(r.archivedAt.slice(0, 10).replace(/-/g, "/"))
@@ -528,12 +553,17 @@
     $("#form-fields").innerHTML = fields[p]
       .map(([k, label, type]) => {
         const value =
-          row[k] ?? (type === "date" ? today() : type === "number" ? "0" : "");
+          row[k] ??
+          (type === "date"
+            ? today()
+            : type === "number"
+              ? "0"
+              : "");
         let input;
         if (type === "textarea")
           input = `<textarea name="${k}">${esc(value)}</textarea>`;
-        else if (["text", "number", "date", "time"].includes(type))
-          input = `<input name="${k}" type="${type}" ${type === "number" ? 'step="any"' : ""} value="${esc(value)}" ${["title", "name"].includes(k) ? "required" : ""}>`;
+        else if (["text", "number", "budget", "date", "time"].includes(type))
+          input = `<input name="${k}" type="${type === "budget" ? "number" : type}" ${type === "number" || type === "budget" ? 'step="any"' : ""} value="${esc(value)}" ${["title", "name"].includes(k) ? "required" : ""}>`;
         else
           input = `<select name="${k}">${          options(type, row[k])
             .map(
@@ -793,7 +823,11 @@
   $("#edit-form").addEventListener("input", (e) => {
     if (editing?.original && e.target.name && editing.p !== "expenses")
       editing.row[e.target.name] =
-        e.target.type === "number" ? Number(e.target.value) : e.target.value;
+        e.target.name === "budget" && e.target.value === ""
+          ? null
+          : e.target.type === "number"
+            ? Number(e.target.value)
+            : e.target.value;
   });
   $("#edit-form").onsubmit = (e) => {
     e.preventDefault();
@@ -803,8 +837,14 @@
       ...Object.fromEntries(new FormData(e.target)),
     };
     fields[p]
-      .filter((f) => f[2] === "number")
-      .forEach((f) => (r[f[0]] = Number(r[f[0]])));
+      .filter((f) => f[2] === "number" || f[2] === "budget")
+      .forEach(
+        (f) =>
+          (r[f[0]] =
+            f[0] === "budget" && r[f[0]] === ""
+              ? null
+              : Number(r[f[0]])),
+      );
     r.id = id || D.nextId(state[p], prefixes[p]);
     const error = validate(p, r);
     if (error) {

@@ -27,7 +27,7 @@
     },
     remaining(s, groupId) {
       const g = s.groups.find((g) => g.id === groupId);
-      return (g?.budget || 50000) - D.expenses(s, groupId);
+      return g?.budget == null ? null : g.budget - D.expenses(s, groupId);
     },
     venueConflict(s, r) {
       return s.reservations.some(
@@ -142,7 +142,7 @@
           name: "string",
           representative: "string",
           members: "number",
-          budget: "number",
+          budget: "optionalNumber",
         },
         sponsors: {
           id: "string",
@@ -246,6 +246,8 @@
               const value = row[key];
               if (Array.isArray(type)) return type.includes(value);
               if (type === "number") return Number.isFinite(value);
+              if (type === "optionalNumber")
+                return value === null || Number.isFinite(value);
               if (type === "text") return typeof value === "string";
               if (type === "optionalString")
                 return typeof value === "string";

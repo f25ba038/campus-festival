@@ -31,15 +31,88 @@
       return g?.budget == null ? null : g.budget - D.expenses(s, groupId);
     },
     venueConflict(s, r) {
-      return s.reservations.some(
-        (x) =>
-          x.id !== r.id &&
-          x.status !== "cancelled" &&
-          x.venueId === r.venueId &&
-          x.date === r.date &&
-          ((r.start >= x.start && r.start <= x.end) ||
-            (r.end >= x.start && r.end <= x.end)),
+      return (
+        s.reservations.find(
+          (x) =>
+            x.id !== r.id &&
+            x.status !== "cancelled" &&
+            x.venueId === r.venueId &&
+            x.date === r.date &&
+            r.start < x.end &&
+            x.start < r.end,
+        ) || null
       );
+    },
+    equipmentConflict(s, r) {
+      if (r.status === "returned") return null;
+      const equipment = s.equipment.find((item) => item.id === r.equipmentId);
+      if (!equipment) return null;
+      const reservations = s.loans.filter(
+        (loan) =>
+          loan.id !== r.id &&
+          loan.equipmentId === r.equipmentId &&
+          (loan.status === "reserved" || loan.status === "active"),
+      );
+      const hasSchedule = (loan) =>
+        /^\d{4}-\d{2}-\d{2}$/.test(loan.date || "") &&
+        /^\d{2}:\d{2}$/.test(loan.start || "") &&
+        /^\d{2}:\d{2}$/.test(loan.end || "") &&
+        loan.start < loan.end;
+      const scheduledReservations = reservations.filter(
+        (loan) =>
+          hasSchedule(loan) &&
+          loan.date === r.date &&
+          loan.start < r.end &&
+          r.start < loan.end,
+      );
+      const legacyReservations = reservations.filter(
+        (loan) => !hasSchedule(loan),
+      );
+      const boundaries = [
+        r.start,
+        r.end,
+        ...scheduledReservations.flatMap((loan) => [
+          loan.start > r.start ? loan.start : r.start,
+          loan.end < r.end ? loan.end : r.end,
+        ]),
+      ]
+        .sort()
+        .filter(
+          (time, index, times) => index === 0 || time !== times[index - 1],
+        );
+      for (let index = 0; index < boundaries.length - 1; index++) {
+        const start = boundaries[index],
+          end = boundaries[index + 1],
+          overlapping = [
+            ...legacyReservations,
+            ...scheduledReservations.filter(
+              (loan) => loan.start < end && start < loan.end,
+            ),
+          ],
+          reservedQuantity = overlapping.reduce(
+            (total, loan) => total + Number(loan.quantity),
+            0,
+          );
+        if (reservedQuantity + Number(r.quantity) > Number(equipment.stock))
+          return {
+            reservations: overlapping,
+            start,
+            end,
+            stock: Number(equipment.stock),
+            requested: Number(r.quantity),
+            alreadyReserved: reservedQuantity,
+          };
+      }
+      if (Number(r.quantity) > Number(equipment.stock))
+        return {
+          reservations: [],
+          start: r.start,
+          end: r.end,
+          stock: Number(equipment.stock),
+          requested: Number(r.quantity),
+          alreadyReserved: 0,
+        };
+      return null;
     },
     available(s, id) {
       const e = s.equipment.find((e) => e.id === id);
@@ -62,7 +135,7 @@
       return "";
     },
     validateTime(r) {
-      return r.start > r.end ? "終了時刻を開始時刻より後にしてください" : "";
+      return r.start >= r.end ? "終了時刻を開始時刻より後にしてください" : "";
     },
     shiftConflict(s, r) {
       return s.shifts.some(

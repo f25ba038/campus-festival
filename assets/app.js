@@ -19,6 +19,7 @@
     storageWarning = "",
     filterText = "",
     filterStatus = "",
+    groupFilter = "active",
     overdueOnly = false,
     sortKey = "id",
     editing = null,
@@ -306,7 +307,7 @@
     try {
       localStorage.setItem(KEY, JSON.stringify(state));
     } catch (e) {
-      toast("保存できませんでした。データ管理からバックアップしてください。");@
+      toast("保存できませんでした。データ管理からバックアップしてください。");
       return;
     }
     if (message) toast(message);
@@ -506,8 +507,51 @@
         : "—";
     return esc(r[k]);
   }
+  function deleteDetails(p, row) {
+    return columns(p)
+      .filter(([key]) => key !== "id" && !key.startsWith("_"))
+      .filter(([key]) => row[key] !== undefined && row[key] !== "")
+      .map(
+        ([key, label]) =>
+          `<dt>${esc(label)}</dt><dd>${cell(row, key, p)}</dd>`,
+      )
+      .join("");
+  }
+  function confirmDelete(p, id) {
+    const row = state[p].find((item) => item.id === id);
+    if (!row) {
+      toast("削除対象が見つかりません。画面を更新してください。");
+      render();
+      return;
+    }
+    const isGroup = p === "groups";
+    $("#delete-title").textContent = isGroup ? "団体を履歴へ移動" : "削除の確認";
+    $("#delete-message").textContent = isGroup
+      ? "この団体を履歴へ移動します。関連するデータは維持されます。"
+      : "次のデータを削除します。この操作は取り消せません。";
+    $("#delete-details").innerHTML = deleteDetails(p, row);
+    $("#confirm-delete").textContent = isGroup ? "履歴へ移動" : "削除する";
+    $("#cancel-delete").onclick = $("#cancel-delete-close").onclick = () =>
+      $("#delete-confirm").close();
+    $("#confirm-delete").onclick = () => {
+      $("#delete-confirm").close();
+      if (isGroup) D.deleteGroup(state, id);
+      else state[p] = state[p].filter((item) => item.id !== id);
+      save(pages[p][1] + (isGroup ? "を履歴へ移動しました" : "を削除しました"));
+      render();
+    };
+    $("#delete-confirm").showModal();
+  }
   function renderList(p) {
     let rows = p === "notices" ? D.notices(state, state.groupId) : state[p];
+    if (p === "groups")
+      rows = rows.filter((group) =>
+        groupFilter === "all"
+          ? true
+          : groupFilter === "archived"
+            ? Boolean(group.archivedAt)
+            : !group.archivedAt,
+      );
     rows = D.search(rows, filterText);
     if (filterStatus)
       rows = rows.filter((r) =>
@@ -720,6 +764,11 @@
   function bind(p) {
     if (fields[p]) {
       $("#add-row").onclick = () => openEditor(p);
+      if (p === "groups")
+        $("#group-filter").onchange = (e) => {
+          groupFilter = e.target.value;
+          render();
+        };
       $("#search").oninput = (e) => {
         const pos = e.target.selectionStart;
         filterText = e.target.value;
@@ -766,11 +815,7 @@
       document.querySelectorAll("[data-delete]").forEach(
         (b) =>
           (b.onclick = () => {
-            if (!confirm("このデータを削除しますか？")) return;
-            if (p === "groups") D.deleteGroup(state, b.dataset.delete);
-            else state[p] = state[p].filter((r) => r.id !== b.dataset.delete);
-            save(pages[p][1] + "を削除しました");
-            render();
+            confirmDelete(p, b.dataset.delete);
           }),
       );
       document.querySelectorAll("[data-approve]").forEach(

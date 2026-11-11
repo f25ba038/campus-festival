@@ -70,8 +70,68 @@
           x.id !== r.id &&
           x.name === r.name &&
           x.date === r.date &&
-          x.start === r.start,
+          r.start < x.end &&
+          x.start < r.end,
       );
+    },
+    validateShiftBreak(r) {
+      const start = r.breakStart || "";
+      const end = r.breakEnd || "";
+      if (!start && !end) return "";
+      if (!start || !end) return "休憩の開始時刻と終了時刻を入力してください";
+      if (
+        !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(start) ||
+        !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(end)
+      )
+        return "休憩時刻を正しく入力してください";
+      if (start >= end)
+        return "休憩の終了時刻を開始時刻より後にしてください";
+      if (start < r.start || end > r.end)
+        return "休憩時間はシフト時間内に設定してください";
+      return "";
+    },
+    shiftCoverage(shifts, date) {
+      const dayShifts = shifts.filter((shift) => shift.date === date);
+      const minutes = (time) => {
+        const [hours, mins] = time.split(":").map(Number);
+        return hours * 60 + mins;
+      };
+      const toTime = (value) =>
+        String(Math.floor(value / 60)).padStart(2, "0") +
+        ":" +
+        String(value % 60).padStart(2, "0");
+      const boundaries = [
+        ...new Set(
+          dayShifts.flatMap((shift) =>
+            [shift.start, shift.end, shift.breakStart, shift.breakEnd]
+              .filter((time) => /^\d{2}:\d{2}$/.test(time || ""))
+              .map(minutes),
+          ),
+        ),
+      ].sort((a, b) => a - b);
+      return boundaries.slice(0, -1).flatMap((start, index) => {
+        const end = boundaries[index + 1];
+        const assigned = dayShifts.filter(
+          (shift) => minutes(shift.start) <= start && minutes(shift.end) >= end,
+        );
+        if (!assigned.length) return [];
+        const onBreak = assigned.filter(
+          (shift) =>
+            shift.breakStart &&
+            shift.breakEnd &&
+            minutes(shift.breakStart) <= start &&
+            minutes(shift.breakEnd) >= end,
+        );
+        const scheduledNames = new Set(assigned.map((shift) => shift.name));
+        const breakNames = new Set(onBreak.map((shift) => shift.name));
+        return [{
+          start: toTime(start),
+          end: toTime(end),
+          staffingCount: [...scheduledNames].filter((name) => !breakNames.has(name)).length,
+          breakCount: breakNames.size,
+          scheduledCount: scheduledNames.size,
+        }];
+      });
     },
     overdue(r, today) {
       return (
@@ -199,6 +259,8 @@
           date: "date",
           start: "time",
           end: "time",
+          breakStart: "optionalTime",
+          breakEnd: "optionalTime",
           location: "string",
         },
         tasks: {
@@ -249,6 +311,8 @@
               if (type === "text") return typeof value === "string";
               if (type === "optionalString")
                 return typeof value === "string";
+              if (type === "optionalTime")
+                return value === undefined || value === "" || validTime(value);
               if (type === "date") return validDate(value);
               if (type === "time") return validTime(value);
               return typeof value === "string" && value.length > 0;
@@ -257,6 +321,9 @@
         )
           return false;
       }
+
+      if (!data.shifts.every((shift) => !D.validateShiftBreak(shift)))
+        return false;
 
       if (
         (data.groupId !== "" &&

@@ -298,6 +298,13 @@ p {
 .panel-body {
   padding: 20px 22px;
 }
+.shift-coverage h3 {
+  margin: 22px 0 8px;
+  font-size: 13px;
+}
+.shift-coverage .subtitle {
+  margin-bottom: 12px;
+}
 .toolbar {
   display: flex;
   justify-content: space-between;

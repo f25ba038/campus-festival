@@ -154,6 +154,19 @@
   function money(n) {
     return "¥" + Number(n).toLocaleString("ja-JP");
   }
+  function dateWithWeekday(value) {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+    if (!match) return esc(value);
+    const [, year, month, day] = match;
+    const date = new Date(Number(year), Number(month) - 1, Number(day));
+    if (
+      date.getFullYear() !== Number(year) ||
+      date.getMonth() !== Number(month) - 1 ||
+      date.getDate() !== Number(day)
+    )
+      return esc(value);
+    return `${esc(value)}（${"日月火水木金土"[date.getDay()]}）`;
+  }
   function name(collection, id) {
     return state[collection].find((r) => r.id === id)?.name || "未設定";
   }
@@ -425,6 +438,7 @@
         : badge(r[k], statusLabel(r[k], page));
     if (k === "_changeHistory") return applicationChangeHistory(r);
     if (k === "amount" || k === "budget") return money(r[k]);
+    if (k === "date" || k === "due") return dateWithWeekday(r[k]);
     if (k === "_remaining") return money(D.remaining(state, r.id));
     if (k === "_time") return esc(r.start) + " – " + esc(r.end);
     if (k === "_hours") return D.shiftHours(r) + " h";
@@ -469,7 +483,7 @@
         .join(
           "",
         )}</select><span class="subtitle">${rows.length} 件表示</span></div>${exportButton}</div>` +
-      `<div class="panel"><div class="table-scroll"><table><thead><tr>${cols.map((c) => `<th>${c[1]}</th>`).join("")}<th>操作</th></tr></thead><tbody>${rows.length ? rows.map((r) => `<tr>${cols.map((c) => `<td class="${["title", "body", "name"].includes(c[0]) ? "description" : ""}">${cell(r, c[0], p)}</td>`).join("")}<td><div class="actions"><button class="secondary small" data-edit="${esc(r.id)}">編集</button>${p === "applications" ? `<button class="small" data-approve="${esc(r.id)}">承認</button><button class="danger small" data-cancel="${esc(r.id)}">取消</button>` : ""}${p === "loans" ? `<button class="small" data-return="${esc(r.id)}">返却</button>` : ""}${p === "tasks" ? `<button class="small" data-done="${esc(r.id)}">完了</button>` : ""}<button class="danger small" data-delete="${esc(r.id)}">削除</button></div></td></tr>`).join("") : `<tr><td colspan="${cols.length + 1}" class="empty">該当するデータはありません。</td></tr>`}</tbody></table></div></div>`
+      `<div class="panel"><div class="table-scroll"><table><thead><tr>${cols.map((c) => `<th>${c[1]}</th>`).join("")}<th>操作</th></tr></thead><tbody>${rows.length ? rows.map((r) => `<tr>${cols.map((c) => `<td class="${["title", "body", "name"].includes(c[0]) ? "description" : ""}">${cell(r, c[0])}</td>`).join("")}<td><div class="actions"><button class="secondary small" data-edit="${esc(r.id)}">編集</button>${p === "applications" ? `<button class="small" data-approve="${esc(r.id)}">承認</button><button class="danger small" data-cancel="${esc(r.id)}">取消</button>` : ""}${p === "loans" && r.status === "active" ? `<button class="small" data-return="${esc(r.id)}">返却</button>` : ""}${p === "tasks" ? `<button class="small" data-done="${esc(r.id)}">完了</button>` : ""}${p === "groups" ? (r.archivedAt ? `<button class="small" data-restore-group="${esc(r.id)}">復元</button>` : `<button class="danger small" data-delete="${esc(r.id)}">履歴へ</button>`) : `<button class="danger small" data-delete="${esc(r.id)}">削除</button>`}</div></td></tr>`).join("") : `<tr><td colspan="${cols.length + 1}" class="empty">該当するデータはありません。</td></tr>`}</tbody></table></div></div>`
     );
   }
   function renderSettings() {
@@ -716,7 +730,10 @@
       document.querySelectorAll("[data-return]").forEach(
         (b) =>
           (b.onclick = () => {
-            D.returnLoan(state, b.dataset.return);
+            if (!D.returnLoan(state, b.dataset.return)) {
+              toast("この貸出は返却済みか、返却できる状態ではありません");
+              return;
+            }
             save("返却を記録しました");
             render();
           }),
@@ -744,14 +761,24 @@
         }
         try {
           const data = JSON.parse((await file.text()).replace(/^\uFEFF/, ""));
-          if (!D.validateImport(data) || !D.validateUniqueIds(data))
+          if (!D.validateImport(data))
             throw Error("形式が不正です");
           if (!confirm("現在のデータを置き換えますか？")) return;
-          state = data;
-          save("バックアップを復元しました");
+          const restored = structuredClone(data);
+          restored.activity.unshift({
+            at: new Date().toISOString(),
+            message: "バックアップを復元しました",
+          });
+          restored.activity = restored.activity.slice(0, 100);
+          const serialized = JSON.stringify(restored);
+          localStorage.setItem(KEY, serialized);
+          state = restored;
+          lastSavedState = serialized;
+          storageWarning = "";
+          toast("保存完了：バックアップを復元しました");
           render();
         } catch (e) {
-          toast("読み込めませんでした：" + e.message);
+          toast("バックアップを復元できませんでした。現在のデータは変更されていません。 " + e.message);
         }
       };
       $("#reset").onclick = () => {
@@ -844,7 +871,17 @@
       }
     } else if (id) state[p][state[p].findIndex((x) => x.id === id)] = r;
     else state[p].push(r);
-    save(pages[p][1] + "を保存しました");
+    if (!save(pages[p][1] + "を保存しました")) {
+      editing.saveFailed = true;
+      hasUnsavedChanges = true;
+      $("#form-status").textContent = saveError;
+      return;
+    }
+    if (p === "groups" && !id) {
+      groupFilter = "active";
+      filterText = "";
+      filterStatus = "";
+    }
     $("#editor").close();
     render();
   };
